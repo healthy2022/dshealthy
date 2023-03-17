@@ -16,5 +16,6 @@ namespace WebExtension.ThirdParty.Model
         public bool AllowBirthday { get; set; }
         public bool AllowAnniversary { get; set; }
         public bool AllowRankAdvancement { get; set; }
+        public string Environment { get; set; }
     }
 }
