@@ -16,6 +16,7 @@ using WebExtension.Services.ZiplingoEngagement.Model;
 
 using System.Text.RegularExpressions;
 using WebExtension.Helper;
+using WebExtension.Models;
 using WebExtension.Repositories;
 
 namespace WebExtension.ThirdParty
@@ -1610,7 +1611,28 @@ namespace WebExtension.ThirdParty
 
             return null;
         }
+        public void AssociateStatusSync(List<GetAssociateStatusModel> associateStatuses)
+        {
+            try
+            {
+                if (associateStatuses.Count != 0)
+                {
+                    foreach (var item in associateStatuses)
+                    {
+                        var associateSummary = _distributorService.GetAssociate(item.AssociateID).Result;
+                        associateSummary.StatusId = item.CurrentStatusId;
+                        UpdateContact(associateSummary);
+                    }
+                }
 
-      
+            }
+            catch (Exception ex)
+            {
+                
+            }
+
+        }
+
+
     }
 }

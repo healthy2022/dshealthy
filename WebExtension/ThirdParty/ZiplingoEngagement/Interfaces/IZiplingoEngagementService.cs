@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using WebExtension.ThirdParty.ZiplingoEngagement.Model;
 using DirectScale.Disco.Extension.Hooks.Commissions;
 using DirectScale.Disco.Extension.Hooks.Associates;
+using WebExtension.Models;
 
 namespace WebExtension.ThirdParty.ZiplingoEngagement.Interfaces
 {
@@ -29,6 +30,7 @@ namespace WebExtension.ThirdParty.ZiplingoEngagement.Interfaces
         void CreateAutoshipTrigger(Autoship autoshipInfo);
         void UpdateAutoshipTrigger(DirectScale.Disco.Extension.Autoship updatedAutoshipInfo);
         void ExecuteCommissionEarned();
+        void AssociateStatusSync(List<GetAssociateStatusModel> associateStatuses);
 
     }
 }

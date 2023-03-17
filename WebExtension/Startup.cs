@@ -18,6 +18,7 @@ using WebExtension.Hooks.Associate;
 using WebExtension.Hooks.Autoship;
 using WebExtension.Hooks.Order;
 using WebExtension.Repositories;
+using WebExtension.Repository;
 using WebExtension.Services;
 using WebExtension.ThirdParty;
 using WebExtension.ThirdParty.Interfaces;
@@ -63,12 +64,14 @@ namespace WebExtension
             #endregion
 
             //Repositories
+            services.AddSingleton<IDailyRunRepository, DailyRunRepository>();
             services.AddSingleton<IZiplingoEngagementRepository, ZiplingoEngagementRepository>();
             services.AddSingleton<ICustomLogRepository, CustomLogRepository>();
             //services.AddSingleton<IAssociateWebRepository, AssociateWebRepository>();
             //services.AddSingleton<IOrderWebRepository, OrderWebRepository>();
 
             //Services
+            services.AddSingleton<IDailyRunService, DailyRunService>();
             services.AddSingleton<IZiplingoEngagementService, ZiplingoEngagementService>();
             services.AddSingleton<ICommonService, CommonService>();
             services.AddSingleton<ICustomLogService, CustomLogService>();
