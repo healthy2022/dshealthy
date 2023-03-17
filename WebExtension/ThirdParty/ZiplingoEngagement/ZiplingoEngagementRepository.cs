@@ -74,8 +74,8 @@ namespace WebExtension.ThirdParty
                     var settings = GetSettings();
                     var parameters = new
                     {
-                        Username = "WebExtensionAPI",
-                        Password = "895a78c4-3860-489c-83e2-0ff39db1875d",
+                        Username = "HealthyHomeAPI",
+                        Password = "d194855f-630b-4f72-a9e2-98bb5c2c4ffc",
                         ApiUrl = "http://unifiedbetaapi.ziplingo.com/api/",
                         LogoUrl = "https://az708237.vo.msecnd.net/WebExtension/images/376843ac-31be-42e7-9f7e-a072056b572e",
                         settings.CompanyName
