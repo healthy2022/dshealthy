@@ -19,6 +19,9 @@ using WebExtension.Hooks.Autoship;
 using WebExtension.Hooks.Order;
 using WebExtension.Repositories;
 using WebExtension.Services;
+using WebExtension.ThirdParty;
+using WebExtension.ThirdParty.Interfaces;
+using WebExtension.ThirdParty.ZiplingoEngagement.Interfaces;
 
 namespace WebExtension
 {
@@ -46,12 +49,12 @@ namespace WebExtension
             //Remark This section before upload
             if (CurrentEnvironment.IsDevelopment())
             {
-                //services.AddSingleton<ITokenProvider>(x => new WebExtensionTokenProvider
-                //{
-                //    DirectScaleUrl = Configuration["configSetting:BaseURL"].Replace("{clientId}", Configuration["configSetting:Client"]).Replace("{environment}", Configuration["configSetting:Environment"]),
-                //    DirectScaleSecret = Configuration["configSetting:DirectScaleSecret"],
-                //    ExtensionSecrets = new[] { Configuration["configSetting:ExtensionSecrets"] }
-                //});
+                services.AddSingleton<ITokenProvider>(x => new WebExtensionTokenProvider
+                {
+                    DirectScaleUrl = Configuration["configSetting:BaseURL"].Replace("{clientId}", Configuration["configSetting:Client"]).Replace("{environment}", Configuration["configSetting:Environment"]),
+                    DirectScaleSecret = Configuration["configSetting:DirectScaleSecret"],
+                    ExtensionSecrets = new[] { Configuration["configSetting:ExtensionSecrets"] }
+                });
             }
             //Remark This section before upload
             //
@@ -60,11 +63,13 @@ namespace WebExtension
             #endregion
 
             //Repositories
+            services.AddSingleton<IZiplingoEngagementRepository, ZiplingoEngagementRepository>();
             services.AddSingleton<ICustomLogRepository, CustomLogRepository>();
             //services.AddSingleton<IAssociateWebRepository, AssociateWebRepository>();
             //services.AddSingleton<IOrderWebRepository, OrderWebRepository>();
 
             //Services
+            services.AddSingleton<IZiplingoEngagementService, ZiplingoEngagementService>();
             services.AddSingleton<ICommonService, CommonService>();
             services.AddSingleton<ICustomLogService, CustomLogService>();
             //services.AddSingleton<IAssociateWebService, AssociateWebService>();

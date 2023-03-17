@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 
 namespace WebExtension.ThirdParty.ZiplingoEngagement.Model
 {
-    public class FivedayAutoshipModel
+    public class SevenDayAutoshipModel
     {
         public int AutoshipId { get; set; }
         public int AssociateId { get; set; }

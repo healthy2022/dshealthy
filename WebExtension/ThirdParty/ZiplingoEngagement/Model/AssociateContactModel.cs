@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace WebExtension.Services.ZiplingoEngagementService.Model
+namespace WebExtension.ThirdParty.Model
 {
     public class AssociateContactModel
     {
@@ -42,7 +42,6 @@ namespace WebExtension.Services.ZiplingoEngagementService.Model
         public string SponsorName { get; set; }
         public string SponsorMobile { get; set; }
         public string SponsorEmail { get; set; }
-
         //OrderDate added
         public DateTime? OrderDate { get; set; }
         public DateTime JoinDate { get; set; }

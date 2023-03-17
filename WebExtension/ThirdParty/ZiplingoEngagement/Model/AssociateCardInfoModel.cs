@@ -1,6 +1,9 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 
-namespace WebExtension.Services.ZiplingoEngagementService.Model
+namespace WebExtension.ThirdParty.ZiplingoEngagement.Model
 {
     public class AssociateCardInfoModel
     {

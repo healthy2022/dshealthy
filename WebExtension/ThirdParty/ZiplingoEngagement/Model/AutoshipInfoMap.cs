@@ -1,7 +1,7 @@
 ﻿using DirectScale.Disco.Extension;
 using System;
 
-namespace WebExtension.Services.ZiplingoEngagement.Model
+namespace WebExtension.ThirdParty.ZiplingoEngagement.Model
 {
     public class AutoshipInfoMap
     {
@@ -20,7 +20,7 @@ namespace WebExtension.Services.ZiplingoEngagement.Model
         public DateTime LastProcessDate { get; set; }
         public string Frequency { get; set; }
         public DateTime StartDate { get; set; }
-        public Address ShippingAddress { get; set; }
+        public Address ShipAddress { get; set; }
         public int AssociateId { get; set; }
         public int AutoshipId { get; set; }
         public string Status { get; set; }

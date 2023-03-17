@@ -2,7 +2,7 @@
 using System.Threading.Tasks;
 using DirectScale.Disco.Extension.Hooks;
 using DirectScale.Disco.Extension.Hooks.Associates.Enrollment;
-using WebExtension.Services.ZiplingoEngagementService;
+using WebExtension.ThirdParty.ZiplingoEngagement.Interfaces;
 
 namespace WebExtension.Hooks.Associate
 {
@@ -22,13 +22,12 @@ namespace WebExtension.Hooks.Associate
             {
                 _ziplingoEngagementService.CreateContact(request.Application, response.Result.ApplicationResponse);
 
-                return response;
             }
             catch (Exception e)
             {
-                Console.WriteLine(e);
-                throw;
+                
             }
+            return response;
         }
     }
 }

@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace WebExtension.Services.ZiplingoEngagementService.Model
+namespace WebExtension.ThirdParty.Model
 {
     public class OrderData
     {
@@ -44,8 +44,9 @@ namespace WebExtension.Services.ZiplingoEngagementService.Model
         public string SponsorEmail { get; set; }
         public string DateShipped { get; set; }
         public int AutoshipId { get; set; }
-        public List<OrderLineItem> ProductInfo { get; set; }
+        public string CurrencySymbol { get; set; }
         public string PaymentMethod { get; set; }
+        public List<OrderLineItem> ProductInfo { get; set; }
         public Address ShippingAddress { get; set; }
         public Address BillingAddress { get; set; }
         public string TrackingUrl { get; set; }

@@ -1,7 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
-namespace WebExtension.Services.ZiplingoEngagement.Model
+namespace WebExtension.ThirdParty.ZiplingoEngagement.Model
 {
     public class ZiplingoEngagementListRequest
     {

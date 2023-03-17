@@ -1,6 +1,4 @@
-﻿using System;
-
-namespace WebExtension.Services.ZiplingoEngagement.Model
+﻿namespace WebExtension.ThirdParty.ZiplingoEngagement.Model
 {
     public class AssociateDetail
     {

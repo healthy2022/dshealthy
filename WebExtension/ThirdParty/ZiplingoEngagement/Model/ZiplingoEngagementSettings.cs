@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace WebExtension.Services.ZiplingoEngagementService.Model
+namespace WebExtension.ThirdParty.Model
 {
     public class ZiplingoEngagementSettings
     {

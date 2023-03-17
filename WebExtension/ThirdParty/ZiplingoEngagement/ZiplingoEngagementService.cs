@@ -1,164 +1,145 @@
 ﻿using Newtonsoft.Json;
 using System;
 using System.Linq;
-using WebExtension.Services.ZiplingoEngagementService.Model;
-using WebExtension.Services.ZiplingoEngagement.Model;
+using WebExtension.ThirdParty.Interfaces;
+using WebExtension.ThirdParty.Model;
+using Microsoft.Extensions.Logging;
+using WebExtension.ThirdParty.ZiplingoEngagement.Interfaces;
+using WebExtension.ThirdParty.ZiplingoEngagement.Model;
 using DirectScale.Disco.Extension.Services;
 using DirectScale.Disco.Extension;
+using System.Net.Http;
+using System.Text;
 using System.Collections.Generic;
 using DirectScale.Disco.Extension.Hooks.Commissions;
-using RestSharp;
-using RestSharp.Authenticators;
-using System.Net;
-using System.Net.Security;
-using WebExtension.Repositories;
 using WebExtension.Services.ZiplingoEngagement.Model;
+
 using System.Text.RegularExpressions;
-using WebExtension.ThirdParty.ZiplingoEngagement.Model;
+using WebExtension.Helper;
+using WebExtension.Repositories;
 
-namespace WebExtension.Services.ZiplingoEngagementService
+namespace WebExtension.ThirdParty
 {
-    public interface IZiplingoEngagementService
-    {
-        void CallOrderZiplingoEngagementTrigger(Order order, string eventKey, bool FailedAutoship);
-        void CreateEnrollContact(Order order);
-        void CreateContact(Application req, ApplicationResponse response);
-        void UpdateContact(Associate req);
-        void ResetSettings(CommandRequest commandRequest);
-        void SendOrderShippedEmail(int packageId, string trackingNumber);
-        void AssociateBirthDateTrigger();
-        void AssociateWorkAnniversaryTrigger();
-        EmailOnNotificationEvent OnNotificationEvent(NotificationEvent notification);
-        void FiveDayRunTrigger(List<AutoshipInfo> autoships);
-        void AssociateStatusChangeTrigger(int associateId, int oldStatusId, int newStatusId);
-        void ExpirationCardTrigger(List<CardInfo> cardinfo);
-        LogRealtimeRankAdvanceHookResponse LogRealtimeRankAdvanceEvent(LogRealtimeRankAdvanceHookRequest req);
-        void UpdateAssociateType(int associateId, string oldAssociateType, string newAssociateType, int newAssociateTypeId);
-        void ExecuteCommissionEarned();
-
-        void CreateAutoshipTrigger(Autoship autoshipInfo);
-        void UpdateAutoshipTrigger(DirectScale.Disco.Extension.Autoship updatedAutoshipInfo);
-        void AssociateStatusSync(List<GetAssociateStatusModel> associateStatuses);
-    }
     public class ZiplingoEngagementService : IZiplingoEngagementService
     {
         private readonly IZiplingoEngagementRepository _ZiplingoEngagementRepository;
         private readonly ICompanyService _companyService;
-        private readonly ICustomLogRepository _customLogRepository;
+        private readonly ILogger _logger;
         private static readonly string ClassName = typeof(ZiplingoEngagementService).FullName;
         private readonly IOrderService _orderService;
         private readonly IAssociateService _distributorService;
         private readonly ITreeService _treeService;
         private readonly IRankService _rankService;
+        private readonly IHttpClientService _httpClientService;
         private readonly IPaymentProcessingService _paymentProcessingService;
+        private readonly ICustomLogRepository _customLogRepository;
 
-        public ZiplingoEngagementService(IZiplingoEngagementRepository repository, 
+        public ZiplingoEngagementService(IZiplingoEngagementRepository repository,
             ICompanyService companyService,
-            ICustomLogRepository customLogRepository, 
-            IOrderService orderService, 
-            IAssociateService distributorService, 
-            ITreeService treeService, 
+            ILogger logger,
+            IOrderService orderService,
+            IAssociateService distributorService,
+            ITreeService treeService,
             IRankService rankService,
-            IPaymentProcessingService paymentProcessingService
+            IHttpClientService httpClientService,
+            IPaymentProcessingService paymentProcessingService,
+            ICustomLogRepository customLogRepository
             )
         {
             _ZiplingoEngagementRepository = repository ?? throw new ArgumentNullException(nameof(repository));
             _companyService = companyService ?? throw new ArgumentNullException(nameof(companyService));
-            _customLogRepository = customLogRepository ?? throw new ArgumentNullException(nameof(customLogRepository));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _orderService = orderService ?? throw new ArgumentNullException(nameof(orderService));
             _distributorService = distributorService ?? throw new ArgumentNullException(nameof(distributorService));
             _treeService = treeService ?? throw new ArgumentNullException(nameof(treeService));
             _rankService = rankService ?? throw new ArgumentNullException(nameof(rankService));
+            _httpClientService = httpClientService ?? throw new ArgumentNullException(nameof(httpClientService));
             _paymentProcessingService = paymentProcessingService ?? throw new ArgumentNullException(nameof(paymentProcessingService));
+            _customLogRepository = customLogRepository;
         }
 
         public async void CallOrderZiplingoEngagementTrigger(Order order, string eventKey, bool FailedAutoship)
         {
             try
             {
-                var eventSetting = _ZiplingoEngagementRepository.GetEventSettingDetail(eventKey);
-                if (eventSetting != null && eventSetting?.Status == true)
+                var company = _companyService.GetCompany();
+                var settings = _ZiplingoEngagementRepository.GetSettings();
+                int enrollerID = 0;
+                int sponsorID = 0;
+                if (_treeService.GetNodeDetail(new NodeId(order.AssociateId, 0), TreeType.Enrollment).Result.UplineId != null)
                 {
-                    var company = _companyService.GetCompany();
-                    var settings = _ZiplingoEngagementRepository.GetSettings();
-                    int enrollerID = 0;
-                    int sponsorID = 0;
-                    if (_treeService.GetNodeDetail(new NodeId(order.AssociateId, 0), TreeType.Enrollment).Result.UplineId != null)
-                    {
-                        enrollerID = _treeService.GetNodeDetail(new NodeId(order.AssociateId, 0), TreeType.Enrollment)?.Result.UplineId.AssociateId ?? 0;
-                    }
-                    if (_treeService.GetNodeDetail(new NodeId(order.AssociateId, 0), TreeType.Unilevel).Result.UplineId != null)
-                    {
-                        sponsorID = _treeService.GetNodeDetail(new NodeId(order.AssociateId, 0), TreeType.Unilevel)?.Result.UplineId.AssociateId ?? 0;
-                    }
-
-                    Associate sponsorSummary = new Associate();
-                    Associate enrollerSummary = new Associate();
-                    if (enrollerID <= 0)
-                    {
-                        enrollerSummary = new Associate();
-                    }
-                    else
-                    {
-                        enrollerSummary = await _distributorService.GetAssociate(enrollerID);
-                    }
-                    if (sponsorID > 0)
-                    {
-                        sponsorSummary = await _distributorService.GetAssociate(sponsorID);
-                    }
-                    else
-                    {
-                        sponsorSummary = enrollerSummary;
-                    }
-                    var CardLastFourDegit = _ZiplingoEngagementRepository.GetLastFoutDegitByOrderNumber(order.OrderNumber);
-
-                    OrderData data = new OrderData
-                    {
-                        ShipMethodId = order.Packages.Select(a => a.ShipMethodId).FirstOrDefault(),
-                        AssociateId = order.AssociateId,
-                        BackofficeId = order.BackofficeId,
-                        Email = order.Email,
-                        InvoiceDate = order.InvoiceDate,
-                        IsPaid = order.IsPaid,
-                        LocalInvoiceNumber = order.LocalInvoiceNumber,
-                        Name = order.Name,
-                        Phone = order.BillPhone,
-                        OrderDate = order.OrderDate,
-                        OrderNumber = order.OrderNumber,
-                        OrderType = order.OrderType,
-                        Tax = order.Totals.Select(m => m.Tax).FirstOrDefault(),
-                        ShipCost = order.Totals.Select(m => m.Shipping).FirstOrDefault(),
-                        Subtotal = order.Totals.Select(m => m.SubTotal).FirstOrDefault(),
-                        USDTotal = order.USDTotal,
-                        Total = order.Totals.Select(m => m.Total).FirstOrDefault(),
-                        Discount = order.Totals.Select(m => m.DiscountTotal).FirstOrDefault(),
-                        PaymentMethod = CardLastFourDegit,
-                        ProductInfo = order.LineItems,
-                        ProductNames = string.Join(",", order.LineItems.Select(x => x.ProductName).ToArray()),
-                        ErrorDetails = FailedAutoship ? order.Payments.FirstOrDefault().PaymentResponse.ToString() : "",
-                        CompanyDomain = company.Result.BackOfficeHomePageURL,
-                        LogoUrl = settings.LogoUrl,
-                        CompanyName = settings.CompanyName,
-                        EnrollerId = enrollerSummary.AssociateId,
-                        SponsorId = sponsorSummary.AssociateId,
-                        EnrollerName = enrollerSummary.DisplayFirstName + ' ' + enrollerSummary.DisplayLastName,
-                        EnrollerMobile = enrollerSummary.PrimaryPhone,
-                        EnrollerEmail = enrollerSummary.EmailAddress,
-                        SponsorName = sponsorSummary.DisplayFirstName + ' ' + sponsorSummary.DisplayLastName,
-                        SponsorMobile = sponsorSummary.PrimaryPhone,
-                        SponsorEmail = sponsorSummary.EmailAddress,
-                        BillingAddress = order.BillAddress,
-                        ShippingAddress = order.Packages?.FirstOrDefault()?.ShippingAddress
-                    };
-                    var strData = JsonConvert.SerializeObject(data);
-                    ZiplingoEngagementRequest request = new ZiplingoEngagementRequest { associateid = order.AssociateId, companyname = settings.CompanyName, eventKey = eventKey, data = strData };
-                    var jsonReq = JsonConvert.SerializeObject(request);
-                    CallZiplingoEngagementApi(jsonReq, "Campaign/ExecuteTrigger");
+                    enrollerID = _treeService.GetNodeDetail(new NodeId(order.AssociateId, 0), TreeType.Enrollment).Result?.UplineId.AssociateId ?? 0;
                 }
+                if (_treeService.GetNodeDetail(new NodeId(order.AssociateId, 0), TreeType.Unilevel).Result.UplineId != null)
+                {
+                    sponsorID = _treeService.GetNodeDetail(new NodeId(order.AssociateId, 0), TreeType.Unilevel)?.Result.UplineId.AssociateId ?? 0;
+                }
+
+                Associate sponsorSummary = new Associate();
+                Associate enrollerSummary = new Associate();
+                if (enrollerID <= 0)
+                {
+                    enrollerSummary = new Associate();
+                }
+                else
+                {
+                    enrollerSummary = await _distributorService.GetAssociate(enrollerID);
+                }
+                if (sponsorID > 0)
+                {
+                    sponsorSummary = await _distributorService.GetAssociate(sponsorID);
+                }
+                else
+                {
+                    sponsorSummary = enrollerSummary;
+                }
+                var CardLastFourDegit = _ZiplingoEngagementRepository.GetLastFoutDegitByOrderNumber(order.OrderNumber);
+                OrderData data = new OrderData
+                {
+                    ShipMethodId = order.Packages.Select(a => a.ShipMethodId).FirstOrDefault(),
+                    AssociateId = order.AssociateId,
+                    BackofficeId = order.BackofficeId,
+                    Email = order.Email,
+                    InvoiceDate = order.InvoiceDate,
+                    IsPaid = order.IsPaid,
+                    LocalInvoiceNumber = order.LocalInvoiceNumber,
+                    Name = order.Name,
+                    Phone = order.BillPhone,
+                    OrderDate = order.OrderDate,
+                    OrderNumber = order.OrderNumber,
+                    OrderType = order.OrderType,
+                    Tax = order.Totals.Select(m => m.Tax).FirstOrDefault(),
+                    ShipCost = order.Totals.Select(m => m.Shipping).FirstOrDefault(),
+                    Subtotal = order.Totals.Select(m => m.SubTotal).FirstOrDefault(),
+                    Total = order.Totals.Select(m => m.Total).FirstOrDefault(),
+                    Discount = order.Totals.Select(m => m.DiscountTotal).FirstOrDefault(),
+                    CurrencySymbol = order.Totals.Select(m => m.CurrencySymbol).FirstOrDefault(),
+                    PaymentMethod = CardLastFourDegit,
+                    ProductInfo = order.LineItems,
+                    ProductNames = string.Join(",", order.LineItems.Select(x => x.ProductName).ToArray()),
+                    ErrorDetails = FailedAutoship ? order.Payments.FirstOrDefault().PaymentResponse.ToString() : "",
+                    CompanyDomain = company.Result.BackOfficeHomePageURL,
+                    LogoUrl = settings.LogoUrl,
+                    CompanyName = settings.CompanyName,
+                    EnrollerId = enrollerSummary.AssociateId,
+                    SponsorId = sponsorSummary.AssociateId,
+                    EnrollerName = enrollerSummary.DisplayFirstName + ' ' + enrollerSummary.DisplayLastName,
+                    EnrollerMobile = enrollerSummary.PrimaryPhone,
+                    EnrollerEmail = enrollerSummary.EmailAddress,
+                    SponsorName = sponsorSummary.DisplayFirstName + ' ' + sponsorSummary.DisplayLastName,
+                    SponsorMobile = sponsorSummary.PrimaryPhone,
+                    SponsorEmail = sponsorSummary.EmailAddress,
+                    BillingAddress = order.BillAddress,
+                    ShippingAddress = order.Packages?.FirstOrDefault()?.ShippingAddress
+                };
+                var strData = JsonConvert.SerializeObject(data);
+                ZiplingoEngagementRequest request = new ZiplingoEngagementRequest { associateid = order.AssociateId, companyname = settings.CompanyName, eventKey = eventKey, data = strData };
+                var jsonReq = JsonConvert.SerializeObject(request);
+                CallZiplingoEngagementApi(jsonReq, "Campaign/ExecuteTrigger");
             }
             catch (Exception e)
             {
-                
+                _logger.LogError($"{ClassName}.CallOrderZiplingoEngagementTrigger", $"Exception occurred attempting to Execute CallOrderZiplingoEngagementTrigger for associate {order.AssociateId}", e);
             }
         }
 
@@ -166,270 +147,238 @@ namespace WebExtension.Services.ZiplingoEngagementService
         {
             try
             {
-                var eventSetting = _ZiplingoEngagementRepository.GetEventSettingDetail(eventKey);
-                if (eventSetting != null && eventSetting?.Status == true)
+                var company = _companyService.GetCompany();
+                var settings = _ZiplingoEngagementRepository.GetSettings();
+                int enrollerID = 0;
+                int sponsorID = 0;
+                if (_treeService.GetNodeDetail(new NodeId(order.Order.AssociateId, 0), TreeType.Enrollment).Result.UplineId != null)
                 {
-                    var company = _companyService.GetCompany();
-                    var settings = _ZiplingoEngagementRepository.GetSettings();
-                    int enrollerID = 0;
-                    int sponsorID = 0;
-                    if (_treeService.GetNodeDetail(new NodeId(order.Order.AssociateId, 0), TreeType.Enrollment).Result.UplineId != null)
-                    {
-                        enrollerID = _treeService.GetNodeDetail(new NodeId(order.Order.AssociateId, 0), TreeType.Enrollment)?.Result.UplineId.AssociateId ?? 0;
-                    }
-                    if (_treeService.GetNodeDetail(new NodeId(order.Order.AssociateId, 0), TreeType.Unilevel).Result.UplineId != null)
-                    {
-                        sponsorID = _treeService.GetNodeDetail(new NodeId(order.Order.AssociateId, 0), TreeType.Unilevel)?.Result.UplineId.AssociateId ?? 0;
-                    }
+                    enrollerID = _treeService.GetNodeDetail(new NodeId(order.Order.AssociateId, 0), TreeType.Enrollment)?.Result.UplineId.AssociateId ?? 0;
+                }
+                if (_treeService.GetNodeDetail(new NodeId(order.Order.AssociateId, 0), TreeType.Unilevel).Result.UplineId != null)
+                {
+                    sponsorID = _treeService.GetNodeDetail(new NodeId(order.Order.AssociateId, 0), TreeType.Unilevel)?.Result.UplineId.AssociateId ?? 0;
+                }
 
-                    Associate sponsorSummary = new Associate();
-                    Associate enrollerSummary = new Associate();
-                    if (enrollerID <= 0)
+                Associate sponsorSummary = new Associate();
+                Associate enrollerSummary = new Associate();
+                if (enrollerID <= 0)
+                {
+                    enrollerSummary = new Associate();
+                }
+                else
+                {
+                    enrollerSummary = await _distributorService.GetAssociate(enrollerID);
+                }
+                if (sponsorID > 0)
+                {
+                    sponsorSummary = await _distributorService.GetAssociate(sponsorID);
+                }
+                else
+                {
+                    sponsorSummary = enrollerSummary;
+                }
+                var CardLastFourDegit = _ZiplingoEngagementRepository.GetLastFoutDegitByOrderNumber(order.Order.OrderNumber);
+
+                // Track Shipping -----------------------------
+                var TrackingUrl = "";
+                var ShippingTrackingInfo = _ZiplingoEngagementRepository.GetShippingTrackingInfo();
+                if (order.TrackingNumber != null)
+                {
+                    foreach (var shipInfo in ShippingTrackingInfo)
                     {
-                        enrollerSummary = new Associate();
-                    }
-                    else
-                    {
-                        enrollerSummary = await _distributorService.GetAssociate(enrollerID);
-                    }
-                    if (sponsorID > 0)
-                    {
-                        sponsorSummary = await _distributorService.GetAssociate(sponsorID);
-                    }
-                    else
-                    {
-                        sponsorSummary = enrollerSummary;
-                    }
-                    var CardLastFourDegit = _ZiplingoEngagementRepository.GetLastFoutDegitByOrderNumber(order.Order.OrderNumber);
-                    // Track Shipping -----------------------------
-                    var TrackingUrl = "";
-                    var ShippingTrackingInfo = _ZiplingoEngagementRepository.GetShippingTrackingInfo();
-                    if (order.TrackingNumber != null)
-                    {
-                        foreach (var shipInfo in ShippingTrackingInfo)
+                        Match m1 = Regex.Match(order.TrackingNumber, shipInfo.TrackPattern, RegexOptions.IgnoreCase);
+                        if (m1.Success)
                         {
-                            Match m1 = Regex.Match(order.TrackingNumber, shipInfo.TrackPattern, RegexOptions.IgnoreCase);
-                            if (m1.Success)
-                            {
-                                TrackingUrl = shipInfo.ShippingUrl + order.TrackingNumber;
-                                break;
-                            }
+                            TrackingUrl = shipInfo.ShippingUrl + order.TrackingNumber;
+                            break;
                         }
                     }
-
-                    // Track Shipping -----------------------------
-
-
-
-                    OrderData data = new OrderData
-                    {
-                        ShipMethodId = order.ShipMethodId, //ShipMethodId added
-                        AssociateId = order.Order.AssociateId,
-                        BackofficeId = order.Order.BackofficeId,
-                        Email = order.Order.Email,
-                        InvoiceDate = order.Order.InvoiceDate,
-                        IsPaid = order.Order.IsPaid,
-                        LocalInvoiceNumber = order.Order.LocalInvoiceNumber,
-                        Name = order.Order.Name,
-                        Phone = order.Order.BillPhone,
-                        OrderDate = order.Order.OrderDate,
-                        OrderNumber = order.Order.OrderNumber,
-                        OrderType = order.Order.OrderType,
-                        Tax = order.Order.Totals.Select(m => m.Tax).FirstOrDefault(),
-                        ShipCost = order.Order.Totals.Select(m => m.Shipping).FirstOrDefault(),
-                        Subtotal = order.Order.Totals.Select(m => m.SubTotal).FirstOrDefault(),
-                        USDTotal = order.Order.USDTotal,
-                        Total = order.Order.Totals.Select(m => m.Total).FirstOrDefault(),
-                        PaymentMethod = CardLastFourDegit,
-                        ProductInfo = order.Order.LineItems,
-                        ProductNames = string.Join(",", order.Order.LineItems.Select(x => x.ProductName).ToArray()),
-                        ErrorDetails = FailedAutoship ? order.Order.Payments.FirstOrDefault().PaymentResponse.ToString() : "",
-                        CompanyDomain = company.Result.BackOfficeHomePageURL,
-                        LogoUrl = settings.LogoUrl,
-                        TrackingNumber = order.TrackingNumber,
-                        TrackingUrl = TrackingUrl,
-                        Carrier = order.Carrier,
-                        DateShipped = order.DateShipped,
-                        CompanyName = settings.CompanyName,
-                        EnrollerId = enrollerSummary.AssociateId,
-                        SponsorId = sponsorSummary.AssociateId,
-                        AutoshipId = order.AutoshipId,
-                        EnrollerName = enrollerSummary.DisplayFirstName + ' ' + enrollerSummary.DisplayLastName,
-                        EnrollerMobile = enrollerSummary.PrimaryPhone,
-                        EnrollerEmail = enrollerSummary.EmailAddress,
-                        SponsorName = sponsorSummary.DisplayFirstName + ' ' + sponsorSummary.DisplayLastName,
-                        SponsorMobile = sponsorSummary.PrimaryPhone,
-                        SponsorEmail = sponsorSummary.EmailAddress,
-                        BillingAddress = order.Order.BillAddress,
-                        ShippingAddress = order.Order.Packages?.FirstOrDefault()?.ShippingAddress
-                    };
-                    var strData = JsonConvert.SerializeObject(data);
-                    ZiplingoEngagementRequest request = new ZiplingoEngagementRequest { associateid = order.Order.AssociateId, companyname = settings.CompanyName, eventKey = eventKey, data = strData };
-                    var jsonReq = JsonConvert.SerializeObject(request);
-                    CallZiplingoEngagementApi(jsonReq, "Campaign/ExecuteTrigger");
                 }
+
+                OrderData data = new OrderData
+                {
+                    ShipMethodId = order.ShipMethodId, //ShipMethodId added
+                    AssociateId = order.Order.AssociateId,
+                    BackofficeId = order.Order.BackofficeId,
+                    Email = order.Order.Email,
+                    InvoiceDate = order.Order.InvoiceDate,
+                    IsPaid = order.Order.IsPaid,
+                    LocalInvoiceNumber = order.Order.LocalInvoiceNumber,
+                    Name = order.Order.Name,
+                    Phone = order.Order.BillPhone,
+                    OrderDate = order.Order.OrderDate,
+                    OrderNumber = order.Order.OrderNumber,
+                    OrderType = order.Order.OrderType,
+                    Tax = order.Order.Totals.Select(m => m.Tax).FirstOrDefault(),
+                    ShipCost = order.Order.Totals.Select(m => m.Shipping).FirstOrDefault(),
+                    Subtotal = order.Order.Totals.Select(m => m.SubTotal).FirstOrDefault(),
+                    Total = order.Order.Totals.Select(m => m.Total).FirstOrDefault(),
+                    CurrencySymbol = order.Order.Totals.Select(m => m.CurrencySymbol).FirstOrDefault(),
+                    PaymentMethod = CardLastFourDegit,
+                    ProductInfo = order.Order.LineItems,
+                    ProductNames = string.Join(",", order.Order.LineItems.Select(x => x.ProductName).ToArray()),
+                    ErrorDetails = FailedAutoship ? order.Order.Payments.FirstOrDefault().PaymentResponse.ToString() : "",
+                    CompanyDomain = company.Result.BackOfficeHomePageURL,
+                    LogoUrl = settings.LogoUrl,
+                    TrackingNumber = order.TrackingNumber,
+                    TrackingUrl= TrackingUrl,
+                    Carrier = order.Carrier,
+                    DateShipped = order.DateShipped,
+                    CompanyName = settings.CompanyName,
+                    EnrollerId = enrollerSummary.AssociateId,
+                    SponsorId = sponsorSummary.AssociateId,
+                    AutoshipId = order.AutoshipId,
+                    EnrollerName = enrollerSummary.DisplayFirstName + ' ' + enrollerSummary.DisplayLastName,
+                    EnrollerMobile = enrollerSummary.PrimaryPhone,
+                    EnrollerEmail = enrollerSummary.EmailAddress,
+                    SponsorName = sponsorSummary.DisplayFirstName + ' ' + sponsorSummary.DisplayLastName,
+                    SponsorMobile = sponsorSummary.PrimaryPhone,
+                    SponsorEmail = sponsorSummary.EmailAddress,
+                    BillingAddress = order.Order.BillAddress,
+                    ShippingAddress = order.Order.Packages?.FirstOrDefault()?.ShippingAddress
+                };
+                var strData = JsonConvert.SerializeObject(data);
+                ZiplingoEngagementRequest request = new ZiplingoEngagementRequest { associateid = order.Order.AssociateId, companyname = settings.CompanyName, eventKey = eventKey, data = strData };
+                var jsonReq = JsonConvert.SerializeObject(request);
+                CallZiplingoEngagementApi(jsonReq, "Campaign/ExecuteTrigger");
             }
             catch (Exception e)
             {
-              
+                _logger.LogError($"{ClassName}.CallOrderZiplingoEngagementTrigger", $"Exception occurred attempting to Execute CallOrderZiplingoEngagementTrigger for associate {order.Order.AssociateId}", e);
             }
         }
 
-        public async void CallOrderZiplingoEngagementTriggerListForBirthDayWishes(List<AssociateInfoList> assoInfo, string eventKey)
+        public async void CallOrderZiplingoEngagementTriggerForBirthDayWishes(AssociateInfo assoInfo, string eventKey)
         {
             try
             {
-                var eventSetting = _ZiplingoEngagementRepository.GetEventSettingDetail(eventKey);
-                if (eventSetting != null && eventSetting?.Status == true)
+                var company = _companyService.GetCompany();
+                var settings = _ZiplingoEngagementRepository.GetSettings();
+                int enrollerID = 0;
+                int sponsorID = 0;
+                if (_treeService.GetNodeDetail(new NodeId(assoInfo.AssociateId, 0), TreeType.Enrollment).Result.UplineId != null)
                 {
-                    var company = _companyService.GetCompany();
-                    var settings = _ZiplingoEngagementRepository.GetSettings();
-                    List<AssociateDetail> objassoListDetail = new List<AssociateDetail>();
-                    foreach (var assodetail in assoInfo)
-                    {
-                        AssociateDetail objassDetail = new AssociateDetail();
-                        int enrollerID = 0;
-                        int sponsorID = 0;
-                        if (_treeService.GetNodeDetail(new NodeId(assodetail.AssociateId, 0), TreeType.Enrollment).Result.UplineId != null)
-                        {
-                            enrollerID = _treeService.GetNodeDetail(new NodeId(assodetail.AssociateId, 0), TreeType.Enrollment)?.Result.UplineId.AssociateId ?? 0;
-                        }
-                        if (_treeService.GetNodeDetail(new NodeId(assodetail.AssociateId, 0), TreeType.Unilevel).Result.UplineId != null)
-                        {
-                            sponsorID = _treeService.GetNodeDetail(new NodeId(assodetail.AssociateId, 0), TreeType.Unilevel)?.Result.UplineId.AssociateId ?? 0;
-                        }
-
-                        Associate sponsorSummary = new Associate();
-                        Associate enrollerSummary = new Associate();
-                        if (enrollerID <= 0)
-                        {
-                            enrollerSummary = new Associate();
-                        }
-                        else
-                        {
-                            enrollerSummary = await _distributorService.GetAssociate(enrollerID);
-                        }
-                        if (sponsorID > 0)
-                        {
-                            sponsorSummary = await _distributorService.GetAssociate(sponsorID);
-                        }
-                        else
-                        {
-                            sponsorSummary = enrollerSummary;
-                        }
-                        AssociateInfo data = new AssociateInfo
-                        {
-                            AssociateId = assodetail.AssociateId,
-                            EmailAddress = assodetail.EmailAddress,
-                            Birthdate = assodetail.Birthdate,
-                            FirstName = assodetail.FirstName,
-                            LastName = assodetail.LastName,
-                            CompanyDomain = company.Result.BackOfficeHomePageURL,
-                            LogoUrl = settings.LogoUrl,
-                            CompanyName = settings.CompanyName,
-                            EnrollerId = enrollerSummary.AssociateId,
-                            SponsorId = sponsorSummary.AssociateId,
-                            CommissionActive = true,
-                            EnrollerName = enrollerSummary.DisplayFirstName + ' ' + enrollerSummary.DisplayLastName,
-                            EnrollerMobile = enrollerSummary.PrimaryPhone,
-                            EnrollerEmail = enrollerSummary.EmailAddress,
-                            SponsorName = sponsorSummary.DisplayFirstName + ' ' + sponsorSummary.DisplayLastName,
-                            SponsorMobile = sponsorSummary.PrimaryPhone,
-                            SponsorEmail = sponsorSummary.EmailAddress
-                        };
-                        objassDetail.associateId = assodetail.AssociateId;
-                        objassDetail.data = JsonConvert.SerializeObject(data);
-                        objassoListDetail.Add(objassDetail);
-                    }
-
-                    var strData = objassoListDetail;
-                    ZiplingoEngagementListRequest request = new ZiplingoEngagementListRequest { companyname = settings.CompanyName, eventKey = eventKey, dataList = strData };
-                    var jsonReq = JsonConvert.SerializeObject(request);
-                    CallZiplingoEngagementApi(jsonReq, "Campaign/ExecuteTriggersList");
+                    enrollerID = _treeService.GetNodeDetail(new NodeId(assoInfo.AssociateId, 0), TreeType.Enrollment)?.Result.UplineId.AssociateId ?? 0;
                 }
+                if (_treeService.GetNodeDetail(new NodeId(assoInfo.AssociateId, 0), TreeType.Unilevel).Result.UplineId != null)
+                {
+                    sponsorID = _treeService.GetNodeDetail(new NodeId(assoInfo.AssociateId, 0), TreeType.Unilevel)?.Result.UplineId.AssociateId ?? 0;
+                }
+
+                Associate sponsorSummary = new Associate();
+                Associate enrollerSummary = new Associate();
+                if (enrollerID <= 0)
+                {
+                    enrollerSummary = new Associate();
+                }
+                else
+                {
+                    enrollerSummary = await _distributorService.GetAssociate(enrollerID);
+                }
+                if (sponsorID > 0)
+                {
+                    sponsorSummary = await _distributorService.GetAssociate(sponsorID);
+                }
+                else
+                {
+                    sponsorSummary = enrollerSummary;
+                }
+                AssociateInfo data = new AssociateInfo
+                {
+                    AssociateId = assoInfo.AssociateId,
+                    EmailAddress = assoInfo.EmailAddress,
+                    Birthdate = assoInfo.Birthdate,
+                    FirstName = assoInfo.FirstName,
+                    LastName = assoInfo.LastName,
+                    CompanyDomain = company.Result.BackOfficeHomePageURL,
+                    LogoUrl = settings.LogoUrl,
+                    CompanyName = settings.CompanyName,
+                    EnrollerId = enrollerSummary.AssociateId,
+                    SponsorId = sponsorSummary.AssociateId,
+                    CommissionActive = true,
+                    EnrollerName = enrollerSummary.DisplayFirstName + ' ' + enrollerSummary.DisplayLastName,
+                    EnrollerMobile = enrollerSummary.PrimaryPhone,
+                    EnrollerEmail = enrollerSummary.EmailAddress,
+                    SponsorName = sponsorSummary.DisplayFirstName + ' ' + sponsorSummary.DisplayLastName,
+                    SponsorMobile = sponsorSummary.PrimaryPhone,
+                    SponsorEmail = sponsorSummary.EmailAddress
+                };
+                var strData = JsonConvert.SerializeObject(data);
+                ZiplingoEngagementRequest request = new ZiplingoEngagementRequest { associateid = assoInfo.AssociateId, companyname = settings.CompanyName, eventKey = eventKey, data = strData };
+                var jsonReq = JsonConvert.SerializeObject(request);
+                CallZiplingoEngagementApi(jsonReq, "Campaign/ExecuteTrigger");
             }
             catch (Exception e)
             {
-                
+                _logger.LogError($"{ClassName}.CallOrderZiplingoEngagementTriggerForBirthDayWishes", $"Exception occurred attempting to Execute CallOrderZiplingoEngagementTriggerForBirthDayWishes for associate {assoInfo.AssociateId}", e);
             }
         }
 
-        public async void CallOrderZiplingoEngagementTriggerListForWorkAnniversary(List<AssociateWorkAnniversaryInfoList> assoList, string eventKey)
+        public async void CallOrderZiplingoEngagementTriggerForWorkAnniversary(AssociateInfo assoInfo, string eventKey)
         {
             try
             {
-                var eventSetting = _ZiplingoEngagementRepository.GetEventSettingDetail(eventKey);
-                if (eventSetting != null && eventSetting?.Status == true)
+                var company = _companyService.GetCompany();
+                var settings = _ZiplingoEngagementRepository.GetSettings();
+                int enrollerID = 0;
+                int sponsorID = 0;
+                if (_treeService.GetNodeDetail(new NodeId(assoInfo.AssociateId, 0), TreeType.Enrollment).Result.UplineId != null)
                 {
-                    var company = _companyService.GetCompany();
-                    var settings = _ZiplingoEngagementRepository.GetSettings();
-                    List<AssociateDetail> objassoListDetail = new List<AssociateDetail>();
-                    foreach (var assodetail in assoList)
-                    {
-                        AssociateDetail objassDetail = new AssociateDetail();
-                        int enrollerID = 0;
-                        int sponsorID = 0;
-                        if (_treeService.GetNodeDetail(new NodeId(assodetail.AssociateId, 0), TreeType.Enrollment).Result.UplineId != null)
-                        {
-                            enrollerID = _treeService.GetNodeDetail(new NodeId(assodetail.AssociateId, 0), TreeType.Enrollment)?.Result.UplineId.AssociateId ?? 0;
-                        }
-                        if (_treeService.GetNodeDetail(new NodeId(assodetail.AssociateId, 0), TreeType.Unilevel).Result.UplineId != null)
-                        {
-                            sponsorID = _treeService.GetNodeDetail(new NodeId(assodetail.AssociateId, 0), TreeType.Unilevel)?.Result.UplineId.AssociateId ?? 0;
-                        }
-
-                        Associate sponsorSummary = new Associate();
-                        Associate enrollerSummary = new Associate();
-                        if (enrollerID <= 0)
-                        {
-                            enrollerSummary = new Associate();
-                        }
-                        else
-                        {
-                            enrollerSummary = await _distributorService.GetAssociate(enrollerID);
-                        }
-                        if (sponsorID > 0)
-                        {
-                            sponsorSummary = await _distributorService.GetAssociate(sponsorID);
-                        }
-                        else
-                        {
-                            sponsorSummary = enrollerSummary;
-                        }
-                        AssociateInfo data = new AssociateInfo
-                        {
-                            AssociateId = assodetail.AssociateId,
-                            EmailAddress = assodetail.EmailAddress,
-                            SignupDate = assodetail.SignupDate,
-                            TotalWorkingYears = assodetail.TotalWorkingYears,
-                            FirstName = assodetail.FirstName,
-                            LastName = assodetail.LastName,
-                            CompanyDomain = company.Result.BackOfficeHomePageURL,
-                            LogoUrl = settings.LogoUrl,
-                            CompanyName = settings.CompanyName,
-                            EnrollerId = enrollerSummary.AssociateId,
-                            SponsorId = sponsorSummary.AssociateId,
-                            CommissionActive = true,
-                            EnrollerName = enrollerSummary.DisplayFirstName + ' ' + enrollerSummary.DisplayLastName,
-                            EnrollerMobile = enrollerSummary.PrimaryPhone,
-                            EnrollerEmail = enrollerSummary.EmailAddress,
-                            SponsorName = sponsorSummary.DisplayFirstName + ' ' + sponsorSummary.DisplayLastName,
-                            SponsorMobile = sponsorSummary.PrimaryPhone,
-                            SponsorEmail = sponsorSummary.EmailAddress
-                        };
-                        objassDetail.associateId = assodetail.AssociateId;
-                        objassDetail.data = JsonConvert.SerializeObject(data);
-                        objassoListDetail.Add(objassDetail);
-                    }
-                    var strData = objassoListDetail;
-                    ZiplingoEngagementListRequest request = new ZiplingoEngagementListRequest { companyname = settings.CompanyName, eventKey = eventKey, dataList = strData };
-                    var jsonReq = JsonConvert.SerializeObject(request);
-                    CallZiplingoEngagementApi(jsonReq, "Campaign/ExecuteTriggersList");
+                    enrollerID = _treeService.GetNodeDetail(new NodeId(assoInfo.AssociateId, 0), TreeType.Enrollment)?.Result.UplineId.AssociateId ?? 0;
                 }
+                if (_treeService.GetNodeDetail(new NodeId(assoInfo.AssociateId, 0), TreeType.Unilevel).Result.UplineId != null)
+                {
+                    sponsorID = _treeService.GetNodeDetail(new NodeId(assoInfo.AssociateId, 0), TreeType.Unilevel)?.Result.UplineId.AssociateId ?? 0;
+                }
+
+                Associate sponsorSummary = new Associate();
+                Associate enrollerSummary = new Associate();
+                if (enrollerID <= 0)
+                {
+                    enrollerSummary = new Associate();
+                }
+                else
+                {
+                    enrollerSummary = await _distributorService.GetAssociate(enrollerID);
+                }
+                if (sponsorID > 0)
+                {
+                    sponsorSummary = await _distributorService.GetAssociate(sponsorID);
+                }
+                else
+                {
+                    sponsorSummary = enrollerSummary;
+                }
+                AssociateInfo data = new AssociateInfo
+                {
+                    AssociateId = assoInfo.AssociateId,
+                    EmailAddress = assoInfo.EmailAddress,
+                    SignupDate = assoInfo.SignupDate,
+                    TotalWorkingYears = assoInfo.TotalWorkingYears,
+                    FirstName = assoInfo.FirstName,
+                    LastName = assoInfo.LastName,
+                    CompanyDomain = company.Result.BackOfficeHomePageURL,
+                    LogoUrl = settings.LogoUrl,
+                    CompanyName = settings.CompanyName,
+                    EnrollerId = enrollerSummary.AssociateId,
+                    SponsorId = sponsorSummary.AssociateId,
+                    CommissionActive = true,
+                    EnrollerName = enrollerSummary.DisplayFirstName + ' ' + enrollerSummary.DisplayLastName,
+                    EnrollerMobile = enrollerSummary.PrimaryPhone,
+                    EnrollerEmail = enrollerSummary.EmailAddress,
+                    SponsorName = sponsorSummary.DisplayFirstName + ' ' + sponsorSummary.DisplayLastName,
+                    SponsorMobile = sponsorSummary.PrimaryPhone,
+                    SponsorEmail = sponsorSummary.EmailAddress
+                };
+                var strData = JsonConvert.SerializeObject(data);
+                ZiplingoEngagementRequest request = new ZiplingoEngagementRequest { associateid = assoInfo.AssociateId, companyname = settings.CompanyName, eventKey = eventKey, data = strData };
+                var jsonReq = JsonConvert.SerializeObject(request);
+                CallZiplingoEngagementApi(jsonReq, "Campaign/ExecuteTrigger");
             }
             catch (Exception e)
             {
-               
+                _logger.LogError($"{ClassName}.CallOrderZiplingoEngagementTriggerForWorkAnniversary", $"Exception occurred attempting to Execute CallOrderZiplingoEngagementTriggerForWorkAnniversary for associate {assoInfo.AssociateId}", e);
             }
         }
 
@@ -437,72 +386,69 @@ namespace WebExtension.Services.ZiplingoEngagementService
         {
             try
             {
-                var eventSetting = _ZiplingoEngagementRepository.GetEventSettingDetail(eventKey);
-                if (eventSetting != null && eventSetting?.Status == true)
+                var company = _companyService.GetCompany();
+                var settings = _ZiplingoEngagementRepository.GetSettings();
+                int enrollerID = 0;
+                int sponsorID = 0;
+                if (_treeService.GetNodeDetail(new NodeId(assoRankAdvancementInfo.AssociateId, 0), TreeType.Enrollment).Result.UplineId != null)
                 {
-                    var company = _companyService.GetCompany();
-                    var settings = _ZiplingoEngagementRepository.GetSettings();
-                    int enrollerID = 0;
-                    int sponsorID = 0;
-                    if (_treeService.GetNodeDetail(new NodeId(assoRankAdvancementInfo.AssociateId, 0), TreeType.Enrollment).Result.UplineId != null)
-                    {
-                        enrollerID = _treeService.GetNodeDetail(new NodeId(assoRankAdvancementInfo.AssociateId, 0), TreeType.Enrollment)?.Result.UplineId.AssociateId ?? 0;
-                    }
-                    if (_treeService.GetNodeDetail(new NodeId(assoRankAdvancementInfo.AssociateId, 0), TreeType.Unilevel).Result.UplineId != null)
-                    {
-                        sponsorID = _treeService.GetNodeDetail(new NodeId(assoRankAdvancementInfo.AssociateId, 0), TreeType.Unilevel)?.Result.UplineId.AssociateId ?? 0;
-                    }
-
-                    Associate sponsorSummary = new Associate();
-                    Associate enrollerSummary = new Associate();
-                    if (enrollerID <= 0)
-                    {
-                        enrollerSummary = new Associate();
-                    }
-                    else
-                    {
-                        enrollerSummary = await _distributorService.GetAssociate(enrollerID);
-                    }
-                    if (sponsorID > 0)
-                    {
-                        sponsorSummary = await _distributorService.GetAssociate(sponsorID);
-                    }
-                    else
-                    {
-                        sponsorSummary = enrollerSummary;
-                    }
-                    var associateSummary = await _distributorService.GetAssociate(assoRankAdvancementInfo.AssociateId);
-                    AssociateRankAdvancement data = new AssociateRankAdvancement
-                    {
-                        Rank = assoRankAdvancementInfo.Rank,
-                        AssociateId = assoRankAdvancementInfo.AssociateId,
-                        FirstName = assoRankAdvancementInfo.FirstName,
-                        LastName = assoRankAdvancementInfo.LastName,
-                        PrimaryPhone = assoRankAdvancementInfo.PrimaryPhone,
-                        EmailAddress = assoRankAdvancementInfo.EmailAddress,
-                        CompanyDomain = company.Result.BackOfficeHomePageURL,
-                        LogoUrl = settings.LogoUrl,
-                        CompanyName = settings.CompanyName,
-                        EnrollerId = enrollerSummary.AssociateId,
-                        SponsorId = sponsorSummary.AssociateId,
-                        RankName = assoRankAdvancementInfo.RankName,
-                        CommissionActive = true,
-                        EnrollerName = enrollerSummary.DisplayFirstName + ' ' + enrollerSummary.DisplayLastName,
-                        EnrollerMobile = enrollerSummary.PrimaryPhone,
-                        EnrollerEmail = enrollerSummary.EmailAddress,
-                        SponsorName = sponsorSummary.DisplayFirstName + ' ' + sponsorSummary.DisplayLastName,
-                        SponsorMobile = sponsorSummary.PrimaryPhone,
-                        SponsorEmail = sponsorSummary.EmailAddress
-                    };
-                    var strData = JsonConvert.SerializeObject(data);
-                    ZiplingoEngagementRequest request = new ZiplingoEngagementRequest { associateid = assoRankAdvancementInfo.AssociateId, companyname = settings.CompanyName, eventKey = eventKey, data = strData, rankid = assoRankAdvancementInfo.Rank };
-                    var jsonReq = JsonConvert.SerializeObject(request);
-                    CallZiplingoEngagementApi(jsonReq, "Campaign/RankAdvancement");
+                    enrollerID = _treeService.GetNodeDetail(new NodeId(assoRankAdvancementInfo.AssociateId, 0), TreeType.Enrollment)?.Result.UplineId.AssociateId ?? 0;
                 }
+                if (_treeService.GetNodeDetail(new NodeId(assoRankAdvancementInfo.AssociateId, 0), TreeType.Unilevel).Result.UplineId != null)
+                {
+                    sponsorID = _treeService.GetNodeDetail(new NodeId(assoRankAdvancementInfo.AssociateId, 0), TreeType.Unilevel)?.Result.UplineId.AssociateId ?? 0;
+                }
+
+                Associate sponsorSummary = new Associate();
+                Associate enrollerSummary = new Associate();
+                if (enrollerID <= 0)
+                {
+                    enrollerSummary = new Associate();
+                }
+                else
+                {
+                    enrollerSummary = await _distributorService.GetAssociate(enrollerID);
+                }
+                if (sponsorID > 0)
+                {
+                    sponsorSummary = await _distributorService.GetAssociate(sponsorID);
+                }
+                else
+                {
+                    sponsorSummary = enrollerSummary;
+                }
+                var associateSummary = _distributorService.GetAssociate(assoRankAdvancementInfo.AssociateId);
+                AssociateRankAdvancement data = new AssociateRankAdvancement
+                {
+                    Rank = assoRankAdvancementInfo.Rank,
+                    AssociateId = assoRankAdvancementInfo.AssociateId,
+                    FirstName = assoRankAdvancementInfo.FirstName,
+                    LastName = assoRankAdvancementInfo.LastName,
+                    EmailAddress = associateSummary.Result.EmailAddress,
+                    PrimaryPhone = associateSummary.Result.PrimaryPhone,
+                    CompanyDomain = company.Result.BackOfficeHomePageURL,
+                    LogoUrl = settings.LogoUrl,
+                    CompanyName = settings.CompanyName,
+                    EnrollerId = enrollerSummary.AssociateId,
+                    SponsorId = sponsorSummary.AssociateId,
+                    RankName = assoRankAdvancementInfo.RankName,
+                    CommissionActive = true,
+                    EnrollerName = enrollerSummary.DisplayFirstName + ' ' + enrollerSummary.DisplayLastName,
+                    EnrollerMobile = enrollerSummary.PrimaryPhone,
+                    EnrollerEmail = enrollerSummary.EmailAddress,
+                    SponsorName = sponsorSummary.DisplayFirstName + ' ' + sponsorSummary.DisplayLastName,
+                    SponsorMobile = sponsorSummary.PrimaryPhone,
+                    SponsorEmail = sponsorSummary.EmailAddress
+                };
+                var strData = JsonConvert.SerializeObject(data);
+				_customLogRepository.SaveLog(data.AssociateId, 0, "Debug log : Rank Advancement", "Before trigger API call", "", "", "", "", "");
+				ZiplingoEngagementRequest request = new ZiplingoEngagementRequest { associateid = assoRankAdvancementInfo.AssociateId, companyname = settings.CompanyName, eventKey = eventKey, data = strData, rankid = assoRankAdvancementInfo.Rank };
+                var jsonReq = JsonConvert.SerializeObject(request);
+                CallZiplingoEngagementApi(jsonReq, "Campaign/RankAdvancement");
             }
             catch (Exception e)
             {
-               
+                _logger.LogError($"{ClassName}.CallOrderZiplingoEngagementTriggerForAssociateRankAdvancement", $"Exception occurred attempting to Execute CallOrderZiplingoEngagementTriggerForAssociateRankAdvancement for associate {assoRankAdvancementInfo.AssociateId}", e);
             }
         }
 
@@ -544,7 +490,7 @@ namespace WebExtension.Services.ZiplingoEngagementService
                 }
                 AssociateStatusChange data = new AssociateStatusChange
                 {
-                    OldStatusId = assoStatusChangeInfo.OldStatusId,
+                    OldStatusId= assoStatusChangeInfo.OldStatusId,
                     OldStatus = assoStatusChangeInfo.OldStatus,
                     NewStatusId = assoStatusChangeInfo.NewStatusId,
                     NewStatus = assoStatusChangeInfo.NewStatus,
@@ -572,7 +518,7 @@ namespace WebExtension.Services.ZiplingoEngagementService
             }
             catch (Exception e)
             {
-              
+                _logger.LogError($"{ClassName}.CallOrderZiplingoEngagementTriggerForAssociateChangeStatus", $"Exception occurred attempting to Execute CallOrderZiplingoEngagementTriggerForAssociateChangeStatus for associate {assoStatusChangeInfo.AssociateId}", e);
             }
         }
 
@@ -580,8 +526,8 @@ namespace WebExtension.Services.ZiplingoEngagementService
         {
             try
             {
-                var company = _companyService.GetCompany();
-                var associateInfo = _distributorService.GetAssociate(order.AssociateId);
+                var company = await _companyService.GetCompany();
+                var associateInfo = await _distributorService.GetAssociate(order.AssociateId);
                 var settings = _ZiplingoEngagementRepository.GetSettings();
                 var UserName = _ZiplingoEngagementRepository.GetUsernameById(Convert.ToString(order.AssociateId));
                 int enrollerID = 0;
@@ -613,33 +559,30 @@ namespace WebExtension.Services.ZiplingoEngagementService
                 {
                     sponsorSummary = enrollerSummary;
                 }
-                var associateSummary = await _distributorService.GetAssociate(order.AssociateId);
-                var associateOrders = await _orderService.GetOrdersByAssociateId(order.AssociateId, "");
-
                 var ZiplingoEngagementRequest = new AssociateContactModel
                 {
-                    AssociateId = associateInfo.Result.AssociateId,
-                    AssociateType = associateInfo.Result.AssociateBaseType,
-                    BackOfficeId = associateInfo.Result.BackOfficeId,
-                    firstName = associateInfo.Result.DisplayFirstName,
-                    lastName = associateInfo.Result.DisplayLastName,
-                    address = associateInfo.Result.Address.AddressLine1 + " " + associateInfo.Result.Address.AddressLine2 + " " + associateInfo.Result.Address.AddressLine3,
-                    city = associateInfo.Result.Address.City,
-                    birthday = associateInfo.Result.BirthDate,
-                    CountryCode = associateInfo.Result.Address.CountryCode,
-                    distributerId = associateInfo.Result.BackOfficeId,
-                    phoneNumber = associateInfo.Result.TextNumber,
-                    region = associateInfo.Result.Address.CountryCode,
-                    state = associateInfo.Result.Address.State,
-                    zip = associateInfo.Result.Address.PostalCode,
+                    AssociateId = associateInfo.AssociateId,
+                    AssociateType = associateInfo.AssociateBaseType,
+                    BackOfficeId = associateInfo.BackOfficeId,
+                    firstName = associateInfo.DisplayFirstName,
+                    lastName = associateInfo.DisplayLastName,
+                    address = associateInfo.Address.AddressLine1 + " " + associateInfo.Address.AddressLine2 + " " + associateInfo.Address.AddressLine3,
+                    city = associateInfo.Address.City,
+                    birthday = associateInfo.BirthDate,
+                    OrderDate = order.OrderDate, // OrderDate added for first order
+                    CountryCode = associateInfo.Address.CountryCode,
+                    distributerId = associateInfo.BackOfficeId,
+                    phoneNumber = associateInfo.TextNumber,
+                    region = associateInfo.Address.CountryCode,
+                    state = associateInfo.Address.State,
+                    zip = associateInfo.Address.PostalCode,
                     UserName = UserName,
                     WebAlias = UserName,
-                    OrderDate = order.OrderDate,
-                    CompanyUrl = company.Result.BackOfficeHomePageURL,
-                    CompanyDomain = company.Result.BackOfficeHomePageURL,
-                    LanguageCode = associateInfo.Result.LanguageCode,
+                    CompanyUrl = company.BackOfficeHomePageURL,
+                    CompanyDomain = company.BackOfficeHomePageURL,
+                    LanguageCode = associateInfo.LanguageCode,
                     CommissionActive = true,
-                    emailAddress = associateInfo.Result.EmailAddress,
+                    emailAddress = associateInfo.EmailAddress,
                     CompanyName = settings.CompanyName,
                     EnrollerId = enrollerSummary.AssociateId,
                     SponsorId = sponsorSummary.AssociateId,
@@ -649,8 +592,8 @@ namespace WebExtension.Services.ZiplingoEngagementService
                     SponsorName = sponsorSummary.DisplayFirstName + ' ' + sponsorSummary.DisplayLastName,
                     SponsorMobile = sponsorSummary.PrimaryPhone,
                     SponsorEmail = sponsorSummary.EmailAddress,
-                    JoinDate = associateSummary.SignupDate.ToUniversalTime(),
-                    ActiveAutoship = associateOrders.Where(o => o.OrderType == OrderType.Autoship).Any()
+                    JoinDate = associateInfo.SignupDate.ToUniversalTime(),
+                    ActiveAutoship =   _orderService.GetOrders(new int[]{ order.AssociateId }).Result.Where(o => o.OrderType == OrderType.Autoship).Any()
                 };
 
                 var jsonZiplingoEngagementRequest = JsonConvert.SerializeObject(ZiplingoEngagementRequest);
@@ -658,7 +601,29 @@ namespace WebExtension.Services.ZiplingoEngagementService
             }
             catch (Exception e)
             {
-              
+                _logger.LogError($"{ClassName}.CreateContact", $"Exception occurred at Execute CreateContact ZiplingoEngagement for associate {order.AssociateId}", e);
+            }
+        }
+
+        public void AssociateStatusChangeTrigger(int associateId, int oldStatusId, int newStatusId)
+        {
+            try
+            {
+                    AssociateStatusChange obj = new AssociateStatusChange();
+                    var  distributorInfo = _distributorService.GetAssociate(associateId);
+                    obj.OldStatusId = oldStatusId;
+                    obj.OldStatus = _ZiplingoEngagementRepository.GetStatusById(oldStatusId);
+                    obj.NewStatusId = newStatusId;
+                    obj.NewStatus = _ZiplingoEngagementRepository.GetStatusById(newStatusId);
+                    obj.AssociateId = associateId;
+                    obj.FirstName = distributorInfo.Result.DisplayFirstName;
+                    obj.LastName = distributorInfo.Result.DisplayLastName;
+                    obj.EmailAddress = distributorInfo.Result.EmailAddress;
+                    CallOrderZiplingoEngagementTriggerForAssociateChangeStatus(obj, "ChangeAssociateStatus");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Exception occurred in Associate Change Process");
             }
         }
 
@@ -672,7 +637,7 @@ namespace WebExtension.Services.ZiplingoEngagementService
                 if (string.IsNullOrEmpty(req.BackOfficeId))
                     req.BackOfficeId = response.BackOfficeId;
 
-                var company = _companyService.GetCompany();
+                var  company = await _companyService.GetCompany();
                 var settings = _ZiplingoEngagementRepository.GetSettings();
                 int enrollerID = 0;
                 int sponsorID = 0;
@@ -725,8 +690,8 @@ namespace WebExtension.Services.ZiplingoEngagementService
                     zip = req.ApplicantAddress.PostalCode,
                     UserName = req.Username,
                     WebAlias = req.Username,
-                    CompanyUrl = company.Result.BackOfficeHomePageURL,
-                    CompanyDomain = company.Result.BackOfficeHomePageURL,
+                    CompanyUrl = company.BackOfficeHomePageURL,
+                    CompanyDomain = company.BackOfficeHomePageURL,
                     LanguageCode = req.LanguageCode,
                     CompanyName = settings.CompanyName,
                     EnrollerId = enrollerSummary.AssociateId,
@@ -738,34 +703,66 @@ namespace WebExtension.Services.ZiplingoEngagementService
                     SponsorMobile = sponsorSummary.PrimaryPhone,
                     SponsorEmail = sponsorSummary.EmailAddress,
                     JoinDate = associateSummary.SignupDate.ToUniversalTime(),
-                    ActiveAutoship = false
+                    ActiveAutoship = _orderService.GetOrders(new []{ req.AssociateId }).Result.Where(o => o.OrderType == OrderType.Autoship).Any()
                 };
 
                 var jsonZiplingoEngagementRequest = JsonConvert.SerializeObject(ZiplingoEngagementRequest);
                 CallZiplingoEngagementApi(jsonZiplingoEngagementRequest, "Contact/CreateContactV2");
-
-                var eventSetting = _ZiplingoEngagementRepository.GetEventSettingDetail("Enrollment");
-                if (eventSetting != null && eventSetting?.Status == true)
-                {
-                    ZiplingoEngagementRequest request = new ZiplingoEngagementRequest { associateid = req.AssociateId, companyname = settings.CompanyName, eventKey = "Enrollment", data = jsonZiplingoEngagementRequest };
-                    var jsonReq = JsonConvert.SerializeObject(request);
-                    CallZiplingoEngagementApi(jsonReq, "Campaign/ExecuteTrigger");
-                }
+                ZiplingoEngagementRequest request = new ZiplingoEngagementRequest();
+               
+                     request = new ZiplingoEngagementRequest { associateid = req.AssociateId, companyname = settings.CompanyName, eventKey = "Enrollment", data = jsonZiplingoEngagementRequest };
+               
+                var jsonReq = JsonConvert.SerializeObject(request);
+                CallZiplingoEngagementApi(jsonReq, "Campaign/ExecuteTrigger");
             }
             catch (Exception e)
             {
-               
+                _logger.LogError($"{ClassName}.CreateContact", $"Exception occurred at Execute CreateContact ZiplingoEngagement for associate {req.AssociateId}", e);
             }
         }
+
+        public void SentTRCPointNotification(int orderId, double orderAmount, string emailAddress, string associateId, string description , string orderdate)
+        {
+            try
+            {
+                var company = _companyService.GetCompany();
+                var settings = _ZiplingoEngagementRepository.GetSettings();
+                var  associateInfo = _distributorService.GetAssociate(Convert.ToInt32(associateId));
+                var UserName = _ZiplingoEngagementRepository.GetUsernameById(associateId);
+                var data = new TRCPointNotificationModel
+                {
+                    AssociateId = associateId,
+                    firstName = associateInfo.Result.DisplayFirstName,
+                    lastName = associateInfo.Result.DisplayLastName,
+                    CompanyName = settings.CompanyName,
+                    WebAlias = UserName,
+                    LogoUrl = settings.LogoUrl,
+                    CompanyUrl = company.Result.BackOfficeHomePageURL,
+                    OrderId = orderId,
+                    OrderAmount = orderAmount, 
+                    EmailAddress = emailAddress,
+                    Description = description,
+                    OrderCreated = orderdate
+                };
+                var strData = JsonConvert.SerializeObject(data);
+                ZiplingoEngagementRequest request = new ZiplingoEngagementRequest { associateid = Convert.ToInt32(associateId), companyname = settings.CompanyName, eventKey = "TRCPointNotification", data = strData };
+                var jsonReq = JsonConvert.SerializeObject(request);
+                CallZiplingoEngagementApi(jsonReq, "Campaign/ExecuteTrigger");
+            }
+        catch (Exception e)
+        {
+            _logger.LogError($"Exception occurred at Execute TRC Notification for associate {associateId}", e);
+        }
+    }
 
         public async void UpdateContact(Associate req)
         {
             try
             {
                 var settings = _ZiplingoEngagementRepository.GetSettings();
-                var company = _companyService.GetCompany();
+                var company = await _companyService.GetCompany();
                 var UserName = _ZiplingoEngagementRepository.GetUsernameById(Convert.ToString(req.AssociateId));
-                var AssociateInfo = _distributorService.GetAssociate(req.AssociateId);
+                var  AssociateInfo  = await   _distributorService.GetAssociate(req.AssociateId);
                 int enrollerID = 0;
                 int sponsorID = 0;
                 if (_treeService.GetNodeDetail(new NodeId(req.AssociateId, 0), TreeType.Enrollment).Result.UplineId != null)
@@ -777,52 +774,47 @@ namespace WebExtension.Services.ZiplingoEngagementService
                     sponsorID = _treeService.GetNodeDetail(new NodeId(req.AssociateId, 0), TreeType.Unilevel)?.Result.UplineId.AssociateId ?? 0;
                 }
 
-                Associate sponsorSummary = new Associate();
-                Associate enrollerSummary = new Associate();
+                Associate   sponsorSummary = new Associate();
+                Associate   enrollerSummary  = new Associate();
                 if (enrollerID <= 0)
                 {
                     enrollerSummary = new Associate();
                 }
                 else
                 {
-                    enrollerSummary = await _distributorService.GetAssociate(enrollerID);
+                    enrollerSummary = await   _distributorService.GetAssociate(enrollerID);
                 }
                 if (sponsorID > 0)
                 {
-                    sponsorSummary = await _distributorService.GetAssociate(sponsorID);
+                    sponsorSummary = await  _distributorService.GetAssociate(sponsorID);
                 }
                 else
                 {
                     sponsorSummary = enrollerSummary;
                 }
-
-                var associateSummary = await _distributorService.GetAssociate(req.AssociateId);
-                var associateOrders = await _orderService.GetOrdersByAssociateId(req.AssociateId, "");
-
                 var ZiplingoEngagementRequest = new AssociateContactModel
                 {
-                    AssociateId = AssociateInfo.Result.AssociateId,
-                    AssociateType = AssociateInfo.Result.AssociateBaseType,
-                    AssociateStatus = AssociateInfo.Result.StatusId,
-                    BackOfficeId = AssociateInfo.Result.BackOfficeId,
-                    birthday = AssociateInfo.Result.BirthDate,
-                    address = AssociateInfo.Result.Address.AddressLine1 + " " + AssociateInfo.Result.Address.AddressLine2 + " " + AssociateInfo.Result.Address.AddressLine3,
-                    city = AssociateInfo.Result.Address.City,
+                    AssociateId = AssociateInfo.AssociateId,
+                    AssociateType = AssociateInfo.AssociateBaseType,
+                    BackOfficeId = AssociateInfo.BackOfficeId,
+                    birthday = AssociateInfo.BirthDate,
+                    address = AssociateInfo.Address.AddressLine1 + " " + AssociateInfo.Address.AddressLine2 + " " + AssociateInfo.Address.AddressLine3,
+                    city = AssociateInfo.Address.City,
                     CommissionActive = true,
-                    CountryCode = AssociateInfo.Result.Address.CountryCode,
-                    distributerId = AssociateInfo.Result.BackOfficeId,
-                    emailAddress = AssociateInfo.Result.EmailAddress,
-                    firstName = AssociateInfo.Result.DisplayFirstName,
-                    lastName = AssociateInfo.Result.DisplayLastName,
-                    phoneNumber = string.IsNullOrEmpty(AssociateInfo.Result.TextNumber) ? AssociateInfo.Result.PrimaryPhone : AssociateInfo.Result.TextNumber,
-                    region = AssociateInfo.Result.Address.CountryCode,
-                    state = AssociateInfo.Result.Address.State,
-                    zip = AssociateInfo.Result.Address.PostalCode,
-                    LanguageCode = AssociateInfo.Result.LanguageCode,
+                    CountryCode = AssociateInfo.Address.CountryCode,
+                    distributerId = AssociateInfo.BackOfficeId,
+                    emailAddress = AssociateInfo.EmailAddress,
+                    firstName = AssociateInfo.DisplayFirstName,
+                    lastName = AssociateInfo.DisplayLastName,
+                    phoneNumber =string.IsNullOrEmpty(AssociateInfo.TextNumber) ? AssociateInfo.PrimaryPhone : AssociateInfo.TextNumber,
+                    region = AssociateInfo.Address.CountryCode,
+                    state = AssociateInfo.Address.State,
+                    zip = AssociateInfo.Address.PostalCode,
+                    LanguageCode = AssociateInfo.LanguageCode,
                     UserName = UserName,
                     WebAlias = UserName,
-                    CompanyUrl = company.Result.BackOfficeHomePageURL,
-                    CompanyDomain = company.Result.BackOfficeHomePageURL,
+                    CompanyUrl = company.BackOfficeHomePageURL,
+                    CompanyDomain = company.BackOfficeHomePageURL,
                     CompanyName = settings.CompanyName,
                     EnrollerId = enrollerSummary.AssociateId,
                     SponsorId = sponsorSummary.AssociateId,
@@ -832,8 +824,8 @@ namespace WebExtension.Services.ZiplingoEngagementService
                     SponsorName = sponsorSummary.DisplayFirstName + ' ' + sponsorSummary.DisplayLastName,
                     SponsorMobile = sponsorSummary.PrimaryPhone,
                     SponsorEmail = sponsorSummary.EmailAddress,
-                    JoinDate = associateSummary.SignupDate.ToUniversalTime(),
-                    ActiveAutoship = associateOrders.Where(o => o.OrderType == OrderType.Autoship).Any()
+                    JoinDate = AssociateInfo.SignupDate.ToUniversalTime(),
+                    ActiveAutoship = _orderService.GetOrders(new [] { req.AssociateId }).Result.Where(o => o.OrderType == OrderType.Autoship).Any()
                 };
 
                 var jsonReq = JsonConvert.SerializeObject(ZiplingoEngagementRequest);
@@ -841,29 +833,40 @@ namespace WebExtension.Services.ZiplingoEngagementService
             }
             catch (Exception e)
             {
-               
+                _logger.LogError($"{ClassName}.UpdateContact", $"Exception occurred attempting to UpdateContact for associate {req.AssociateId}", e);
             }
         }
 
-        public void AssociateStatusChangeTrigger(int associateId, int oldStatusId, int newStatusId)
+
+        public HttpResponseMessage CallZiplingoEngagementApi(string jsonData, string apiMethod)
         {
             try
             {
-                AssociateStatusChange obj = new AssociateStatusChange();
-                var distributorInfo = _distributorService.GetAssociate(associateId);
-                obj.OldStatusId = oldStatusId;
-                obj.OldStatus = _ZiplingoEngagementRepository.GetStatusById(oldStatusId);
-                obj.NewStatusId = newStatusId;
-                obj.NewStatus = _ZiplingoEngagementRepository.GetStatusById(newStatusId);
-                obj.AssociateId = associateId;
-                obj.FirstName = distributorInfo.Result.DisplayFirstName;
-                obj.LastName = distributorInfo.Result.DisplayLastName;
-                obj.EmailAddress = distributorInfo.Result.EmailAddress;
-                CallOrderZiplingoEngagementTriggerForAssociateChangeStatus(obj, "ChangeAssociateStatus");
+                var settings = _ZiplingoEngagementRepository.GetSettings();
+
+                //httpClient call
+                var apiUrl = settings.ApiUrl + apiMethod;
+                HttpRequestMessage request = new HttpRequestMessage(new HttpMethod("POST"), new Uri(apiUrl));
+                request.Content = new StringContent(jsonData, Encoding.UTF8, "application/json");
+                var data = _httpClientService.PostRequestByUsername(request, settings.Username, settings.Password);
+
+                return data;
             }
             catch (Exception ex)
             {
-              
+                throw ex;
+            }
+        }
+
+        public void ResetSettings(CommandRequest commandRequest)
+        {
+            try
+            {
+                _ZiplingoEngagementRepository.ResetSettings();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"{ClassName}.ResetZiplingoSettings", $"Exception occurred attempting to ResetSettings", ex);
             }
         }
 
@@ -890,68 +893,52 @@ namespace WebExtension.Services.ZiplingoEngagementService
 
         public void AssociateBirthDateTrigger()
         {
-            string eventKey = "AssociateBirthdayWishes";
-            var eventSetting = _ZiplingoEngagementRepository.GetEventSettingDetail(eventKey);
-            if (eventSetting != null && eventSetting?.Status == true)
+            var settings = _ZiplingoEngagementRepository.GetSettings();
+            if (settings.AllowBirthday)
             {
                 var associateInfo = _ZiplingoEngagementRepository.AssociateBirthdayWishesInfo();
                 if (associateInfo == null) return;
 
-                for (int i = 0; i < associateInfo.Count; i = i + 100)
+                foreach (var assoInfo in associateInfo)
                 {
-                    List<AssociateInfoList> assoList = new List<AssociateInfoList>();
-                    var items = associateInfo.Skip(i).Take(100);
-                    foreach (var assoInfo in items)
-                    {
-                        AssociateInfoList objasso = new AssociateInfoList();
-                        objasso.AssociateId = assoInfo.AssociateId;
-                        objasso.Birthdate = assoInfo.Birthdate;
-                        objasso.EmailAddress = assoInfo.EmailAddress;
-                        objasso.FirstName = assoInfo.FirstName;
-                        objasso.LastName = assoInfo.LastName;
-                        assoList.Add(objasso);
-                    }
-                    CallOrderZiplingoEngagementTriggerListForBirthDayWishes(assoList, "AssociateBirthdayWishes");
+                    AssociateInfo asso = new AssociateInfo();
+                    asso.AssociateId = assoInfo.AssociateId;
+                    asso.Birthdate = assoInfo.Birthdate;
+                    asso.EmailAddress = assoInfo.EmailAddress;
+                    asso.FirstName = assoInfo.FirstName;
+                    asso.LastName = assoInfo.LastName;
+                    CallOrderZiplingoEngagementTriggerForBirthDayWishes(asso, "AssociateBirthdayWishes");
                 }
             }
         }
 
         public void AssociateWorkAnniversaryTrigger()
         {
-            string eventKey = "AssociateWorkAnniversary";
-            var eventSetting = _ZiplingoEngagementRepository.GetEventSettingDetail(eventKey);
-            if (eventSetting != null && eventSetting?.Status == true)
+            var settings = _ZiplingoEngagementRepository.GetSettings();
+            if (settings.AllowAnniversary)
             {
                 var associateInfo = _ZiplingoEngagementRepository.AssociateWorkAnniversaryInfo();
                 if (associateInfo == null) return;
 
-                for (int i = 0; i < associateInfo.Count; i = i + 100)
+                foreach (var assoInfo in associateInfo)
                 {
-                    List<AssociateWorkAnniversaryInfoList> assoList = new List<AssociateWorkAnniversaryInfoList>();
-                    var items = associateInfo.Skip(i).Take(100);
-                    foreach (var assoInfo in items)
-                    {
-                        AssociateWorkAnniversaryInfoList objasso = new AssociateWorkAnniversaryInfoList();
-                        objasso.AssociateId = assoInfo.AssociateId;
-                        objasso.Birthdate = assoInfo.Birthdate;
-                        objasso.EmailAddress = assoInfo.EmailAddress;
-                        objasso.FirstName = assoInfo.FirstName;
-                        objasso.LastName = assoInfo.LastName;
-                        objasso.SignupDate = assoInfo.SignupDate;
-                        objasso.TotalWorkingYears = assoInfo.TotalWorkingYears;
-                        assoList.Add(objasso);
-                    }
-                    CallOrderZiplingoEngagementTriggerListForWorkAnniversary(assoList, eventKey);
+                    AssociateInfo asso = new AssociateInfo();
+                    asso.AssociateId = assoInfo.AssociateId;
+                    asso.SignupDate = assoInfo.SignupDate;
+                    asso.EmailAddress = assoInfo.EmailAddress;
+                    asso.FirstName = assoInfo.FirstName;
+                    asso.LastName = assoInfo.LastName;
+                    asso.TotalWorkingYears = assoInfo.TotalWorkingYears;
+                    CallOrderZiplingoEngagementTriggerForWorkAnniversary(asso, "AssociateWorkAnniversary");
                 }
             }
         }
 
         public EmailOnNotificationEvent OnNotificationEvent(NotificationEvent notification)
         {
-            switch (notification.EventType)
+            if((int)notification.EventType == 1)
             {
-                case EventType.RankAdvancement:
-                    return CallRankAdvancementEvent(notification);
+               return CallRankAdvancementEvent(notification.EventValue);
             }
             return null;
         }
@@ -960,175 +947,129 @@ namespace WebExtension.Services.ZiplingoEngagementService
             return LogRankAdvancement(req);
         }
 
-        public LogRealtimeRankAdvanceHookResponse LogRankAdvancement(LogRealtimeRankAdvanceHookRequest req)
+        public  LogRealtimeRankAdvanceHookResponse LogRankAdvancement(LogRealtimeRankAdvanceHookRequest req)
         {
             try
             {
+                var logMessage = String.Empty;
                 AssociateRankAdvancement obj = new AssociateRankAdvancement();
-                var rankName = _rankService.GetRankName(req.NewRank).GetAwaiter().GetResult();
-                var associateInfo = _distributorService.GetAssociate(req.AssociateId).GetAwaiter().GetResult();
-                obj.Rank = req.NewRank;
-                obj.RankName = rankName.ToString();
-                obj.AssociateId = req.AssociateId;
-                obj.FirstName = associateInfo.DisplayFirstName;
-                obj.LastName = associateInfo.DisplayLastName;
-                CallOrderZiplingoEngagementTriggerForAssociateRankAdvancement(obj, "RankAdvancement");
+                var settings = _ZiplingoEngagementRepository.GetSettings();
+                var rankName = _rankService.GetRankName(req.NewRank);
+                var associateInfo = _distributorService.GetAssociate(req.AssociateId);
+                if (settings.AllowRankAdvancement)
+                {
+                    obj.Rank = req.NewRank;
+                    obj.RankName = rankName.Result;
+                    obj.AssociateId = req.AssociateId;
+                    obj.FirstName = associateInfo.Result.DisplayFirstName;
+                    obj.LastName = associateInfo.Result.DisplayLastName;
+					_customLogRepository.SaveLog(obj.AssociateId, 0, "Debug log : Rank Advancement", "Payload", "", "", "", "", "");
+					CallOrderZiplingoEngagementTriggerForAssociateRankAdvancement(obj, "RankAdvancement");
+                }
                 return null;
             }
             catch (Exception ex)
             {
-               
+                _logger.LogError(ex, "Exception occurred in Rank Advancement");
             }
             return null;
         }
-
-        public IRestResponse CallZiplingoEngagementApi(string jsonData, string apiMethod)
-        {
-            var settings = _ZiplingoEngagementRepository.GetSettings();
-            var apiUrl = settings.ApiUrl + apiMethod;
-            var client = new RestClient(apiUrl);
-            var messageRequest = new RestRequest(Method.POST);
-
-            client.Authenticator = new HttpBasicAuthenticator(settings.Username, settings.Password);
-
-            messageRequest.AddHeader("cache-control", "no-cache");
-            messageRequest.AddHeader("content-type", "application/json");
-
-            messageRequest.AddParameter("application/json", jsonData, ParameterType.RequestBody);
-            client.Timeout = 3600000;
-
-            ServicePointManager.ServerCertificateValidationCallback = new
-                RemoteCertificateValidationCallback
-                (
-                    delegate { return true; }
-                );
-
-            return client.Execute(messageRequest);
-        }
-
-        public EmailOnNotificationEvent CallRankAdvancementEvent(NotificationEvent notification)
-        {
-            string str = JsonConvert.SerializeObject(notification.EventValue);
-            AssociateRankAdvancement obj = JsonConvert.DeserializeObject<AssociateRankAdvancement>(str);
-            var rank = obj.Rank;
-            var rankName = _rankService.GetRankName(rank);
-            var distributorinfo = _distributorService.GetAssociate(notification.AssociateId);
-            obj.RankName = rankName.ToString();
-            obj.AssociateId = distributorinfo.Result.AssociateId;
-            obj.FirstName = distributorinfo.Result.DisplayFirstName;
-            obj.LastName = distributorinfo.Result.DisplayLastName;
-            CallOrderZiplingoEngagementTriggerForAssociateRankAdvancement(obj, "RankAdvancement");
-            return null;
-        }
-
-        public void ResetSettings(CommandRequest commandRequest)
+        public  EmailOnNotificationEvent CallRankAdvancementEvent(NotificationEvent notification)
         {
             try
             {
-                _ZiplingoEngagementRepository.ResetSettings();
+                var settings = _ZiplingoEngagementRepository.GetSettings();
+                if (settings.AllowRankAdvancement)
+                {
+                    AssociateRankAdvancement obj = new AssociateRankAdvancement();
+                    string str = string.Empty;
+                    var rank = 0;
+                    var rankName = string.Empty;
+                    try
+                    {
+                        if (!String.IsNullOrEmpty(Newtonsoft.Json.JsonConvert.DeserializeObject<dynamic>(notification.EventValue)))
+                        {
+                            str = Newtonsoft.Json.JsonConvert.DeserializeObject<dynamic>(notification.EventValue);
+                            RankObj objRank = JsonConvert.DeserializeObject<RankObj>(str);
+                             rank = objRank.Rank;
+                             rankName = _rankService.GetRankName(rank).Result;
+                        }
+                    }
+                    catch (Exception ex) {
+                        str = ex.Message;
+                    }
+                    var distribuWebExtensionnfo =  _distributorService.GetAssociate(notification.AssociateId);
+                    obj.Rank = rank;
+                    obj.RankName = rankName;
+                    obj.AssociateId = notification.AssociateId;
+                    obj.FirstName = distribuWebExtensionnfo.Result.DisplayFirstName;
+                    obj.LastName = distribuWebExtensionnfo.Result.DisplayLastName;
+                    CallOrderZiplingoEngagementTriggerForAssociateRankAdvancement(obj, "RankAdvancement");
+                }
+                return null;
             }
             catch (Exception ex)
             {
-               
+                _logger.LogError(ex, "Exception occurred in Rank Advancement", JsonConvert.SerializeObject(notification));
             }
+            return null;
         }
 
-        public async void UpdateAssociateType(int associateId, string oldAssociateType, string newAssociateType, int newAssociateTypeId)
+        private class RankObj
         {
+            public int Rank { get; set; }
+        }
+
+
+        public async void SevenDaysBeforeAutoshipTrigger()
+        {
+            var autoships = _ZiplingoEngagementRepository.SevenDaysBeforeAutoshipInfo();
+            if (autoships == null) return;
             try
             {
-                var company = _companyService.GetCompany();
-                var associateTypeModel = new AssociateTypeModel();
+                var company = await _companyService.GetCompany();
                 var settings = _ZiplingoEngagementRepository.GetSettings();
-                var associateSummary = _distributorService.GetAssociate(associateId);
-                var associateOrders = await _orderService.GetOrdersByAssociateId(associateId, "");
-                var UserName = _ZiplingoEngagementRepository.GetUsernameById(Convert.ToString(associateId));
-                int enrollerID = 0;
-                int sponsorID = 0;
-                if (_treeService.GetNodeDetail(new NodeId(associateId, 0), TreeType.Enrollment).Result.UplineId != null)
+                foreach (AutoshipInfo autoinfo in autoships)
                 {
-                    enrollerID = _treeService.GetNodeDetail(new NodeId(associateId, 0), TreeType.Enrollment)?.Result.UplineId.AssociateId ?? 0;
-                }
-                if (_treeService.GetNodeDetail(new NodeId(associateId, 0), TreeType.Unilevel).Result.UplineId != null)
-                {
-                    sponsorID = _treeService.GetNodeDetail(new NodeId(associateId, 0), TreeType.Unilevel)?.Result.UplineId.AssociateId ?? 0;
-                }
+                    try
+                    {
+                        SevenDayAutoshipModel autoship = new SevenDayAutoshipModel();
+                        autoship.AutoshipId = autoinfo.AutoshipId;
+                        autoship.AssociateId = autoinfo.AssociateId;
+                        autoship.UplineID = autoinfo.UplineID;
+                        autoship.BackOfficeID = autoinfo.BackOfficeID;
+                        autoship.NextProcessDate = autoinfo.NextProcessDate;
+                        autoship.StartDate = autoinfo.StartDate;
+                        autoship.FirstName = autoinfo.FirstName;
+                        autoship.LastName = autoinfo.LastName;
+                        autoship.EmailAddress = autoinfo.EmailAddress;
+                        autoship.PrimaryPhone = autoinfo.PrimaryPhone;
+                        autoship.SponsorName = autoinfo.SponsorName;
+                        autoship.SponsorEmail = autoinfo.SponsorEmail;
+                        autoship.SponsorMobile = autoinfo.SponsorMobile;
+                        autoship.OrderNumber = autoinfo.OrderNumber;
+                        autoship.CompanyDomain = company.BackOfficeHomePageURL;
+                        autoship.LogoUrl = settings.LogoUrl;
+                        autoship.CompanyName = settings.CompanyName;
+                        if (autoship.OrderNumber > 0)
+                        {
 
-                Associate sponsorSummary = new Associate();
-                Associate enrollerSummary = new Associate();
-                if (enrollerID <= 0)
-                {
-                    enrollerSummary = new Associate();
+                        }
+                        var strData = JsonConvert.SerializeObject(autoship);
+                        ZiplingoEngagementRequest request = new ZiplingoEngagementRequest { associateid = autoship.AssociateId, companyname = settings.CompanyName, eventKey = "SevenDaysBeforeAutoship", data = strData };
+                        var jsonReq = JsonConvert.SerializeObject(request);
+                        CallZiplingoEngagementApi(jsonReq, "Campaign/ExecuteTrigger");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Exception occurred in Seven DayTrigger autoship record", JsonConvert.SerializeObject(autoinfo));
+                    }
                 }
-                else
-                {
-                    enrollerSummary = await _distributorService.GetAssociate(enrollerID);
-                }
-                if (sponsorID > 0)
-                {
-                    sponsorSummary = await _distributorService.GetAssociate(sponsorID);
-                }
-                else
-                {
-                    sponsorSummary = enrollerSummary;
-                }
-                associateTypeModel.AssociateId = associateId;
-                associateTypeModel.FirstName = associateSummary.Result.DisplayFirstName;
-                associateTypeModel.LastName = associateSummary.Result.DisplayLastName;
-                associateTypeModel.Email = associateSummary.Result.EmailAddress;
-                associateTypeModel.Phone = (associateSummary.Result.TextNumber == "" || associateSummary.Result.TextNumber == null)
-                    ? associateSummary.Result.PrimaryPhone
-                    : associateSummary.Result.TextNumber;
-                associateTypeModel.OldAssociateBaseType = oldAssociateType;
-                associateTypeModel.NewAssociateBaseType = newAssociateType;
-                associateTypeModel.CompanyDomain = company.Result.BackOfficeHomePageURL;
-                associateTypeModel.LogoUrl = settings.LogoUrl;
-                associateTypeModel.CompanyName = settings.CompanyName;
-                associateTypeModel.AssociateType = associateSummary.Result.AssociateType;
-                associateTypeModel.BackOfficeId = associateSummary.Result.BackOfficeId;
-                associateTypeModel.address = associateSummary.Result.Address.AddressLine1 + " " + associateSummary.Result.Address.AddressLine2 + " " + associateSummary.Result.Address.AddressLine3;
-                associateTypeModel.city = associateSummary.Result.Address.City;
-                associateTypeModel.birthday = associateSummary.Result.BirthDate;
-                associateTypeModel.CountryCode = associateSummary.Result.Address.CountryCode;
-                associateTypeModel.distributerId = associateSummary.Result.BackOfficeId;
-                associateTypeModel.region = associateSummary.Result.Address.CountryCode;
-                associateTypeModel.state = associateSummary.Result.Address.State;
-                associateTypeModel.zip = associateSummary.Result.Address.PostalCode;
-                associateTypeModel.UserName = UserName;
-                associateTypeModel.WebAlias = UserName;
-                associateTypeModel.CompanyUrl = company.Result.BackOfficeHomePageURL;
-                associateTypeModel.LanguageCode = associateSummary.Result.LanguageCode;
-                associateTypeModel.CommissionActive = true;
-                associateTypeModel.EnrollerId = enrollerSummary.AssociateId;
-                associateTypeModel.SponsorId = sponsorSummary.AssociateId;
-                associateTypeModel.EnrollerName = enrollerSummary.DisplayFirstName + ' ' + enrollerSummary.DisplayLastName;
-                associateTypeModel.EnrollerMobile = enrollerSummary.PrimaryPhone;
-                associateTypeModel.EnrollerEmail = enrollerSummary.EmailAddress;
-                associateTypeModel.SponsorName = sponsorSummary.DisplayFirstName + ' ' + sponsorSummary.DisplayLastName;
-                associateTypeModel.SponsorMobile = sponsorSummary.PrimaryPhone;
-                associateTypeModel.SponsorEmail = sponsorSummary.EmailAddress;
-                associateTypeModel.JoinDate = associateSummary.Result.SignupDate.ToUniversalTime();
-                associateTypeModel.AssociateStatus = associateSummary.Result.StatusId;
-                associateTypeModel.ActiveAutoship = associateOrders.Where(o => o.OrderType == OrderType.Autoship).Any();
-                //associateTypeModel.OrderDate = order.OrderDate, // OrderDate added for first order
-
-                var strData = JsonConvert.SerializeObject(associateTypeModel);
-
-                AssociateTypeChange request = new AssociateTypeChange
-                {
-                    associateTypeId = newAssociateTypeId,
-                    associateid = associateId,
-                    companyname = settings.CompanyName,
-                    eventKey = "AssociateTypeChange",
-                    data = strData
-                };
-                var jsonReq = JsonConvert.SerializeObject(request);
-                CallZiplingoEngagementApi(jsonReq, "Campaign/ChangeAssociateType");
 
             }
             catch (Exception e)
             {
-               
+                _logger.LogError($"{ClassName}.Seven DayTrigger", $"Exception occurred attempting to Seven DayTrigger", e);
             }
         }
 
@@ -1138,6 +1079,7 @@ namespace WebExtension.Services.ZiplingoEngagementService
             {
                 var company = await _companyService.GetCompany();
                 var settings = _ZiplingoEngagementRepository.GetSettings();
+
                 for (int i = 0; i < autoships.Count; i = i + 100)
                 {
                     List<FivedayAutoshipModel> autoshipList = new List<FivedayAutoshipModel>();
@@ -1165,14 +1107,12 @@ namespace WebExtension.Services.ZiplingoEngagementService
                     }
                     CallFiveDayRunTrigger(autoshipList);
                 }
-
             }
             catch (Exception e)
             {
-               
+                _logger.LogError($"5DayTrigger", $"Exception occurred attempting to 5DayTrigger", e);
             }
         }
-
         public async void CallFiveDayRunTrigger(List<FivedayAutoshipModel> autoshipList)
         {
             try
@@ -1187,11 +1127,11 @@ namespace WebExtension.Services.ZiplingoEngagementService
                     int sponsorID = 0;
                     if (_treeService.GetNodeDetail(new NodeId(autoship.AssociateId, 0), TreeType.Enrollment).Result.UplineId != null)
                     {
-                        enrollerID = _treeService.GetNodeDetail(new NodeId(autoship.AssociateId, 0), TreeType.Enrollment).Result?.UplineId.AssociateId ?? 0;
+                        enrollerID = _treeService.GetNodeDetail(new NodeId(autoship.AssociateId, 0), TreeType.Enrollment)?.Result.UplineId.AssociateId ?? 0;
                     }
                     if (_treeService.GetNodeDetail(new NodeId(autoship.AssociateId, 0), TreeType.Unilevel).Result.UplineId != null)
                     {
-                        sponsorID = _treeService.GetNodeDetail(new NodeId(autoship.AssociateId, 0), TreeType.Unilevel).Result?.UplineId.AssociateId ?? 0;
+                        sponsorID = _treeService.GetNodeDetail(new NodeId(autoship.AssociateId, 0), TreeType.Unilevel)?.Result.UplineId.AssociateId ?? 0;
                     }
 
                     Associate sponsorSummary = new Associate();
@@ -1247,15 +1187,16 @@ namespace WebExtension.Services.ZiplingoEngagementService
 
             catch (Exception e)
             {
-                //_logger.LogError($"5DayTrigger", $"Exception occurred attempting to 5DayTrigger", e);
+                _logger.LogError($"5DayTrigger", $"Exception occurred attempting to 5DayTrigger", e);
             }
         }
 
-        public void ExpirationCardTrigger(List<CardInfo> cardinfo)
+
+        public async void ExpirationCardTrigger(List<CardInfo> cardinfo)
         {
             try
             {
-                var company = _companyService.GetCompany();
+                var company = await _companyService.GetCompany();
                 var settings = _ZiplingoEngagementRepository.GetSettings();
 
                 foreach (CardInfo info in cardinfo)
@@ -1269,7 +1210,7 @@ namespace WebExtension.Services.ZiplingoEngagementService
                         assoObj.Email = info.PrimaryPhone;
                         assoObj.CardDate = info.ExpirationDate;
                         assoObj.CardLast4Degit = info.Last4DegitOfCard;
-                        assoObj.CompanyDomain = company.Result.BackOfficeHomePageURL;
+                        assoObj.CompanyDomain = company.BackOfficeHomePageURL;
                         assoObj.LogoUrl = settings.LogoUrl;
                         assoObj.CompanyName = settings.CompanyName;
 
@@ -1280,13 +1221,189 @@ namespace WebExtension.Services.ZiplingoEngagementService
                     }
                     catch (Exception ex)
                     {
-                     
+                        _logger.LogError(ex, "Exception occurred in Get Card Expiring Info Before 30 Days", JsonConvert.SerializeObject(info));
                     }
                 }
 
             }
             catch (Exception e)
             {
+                _logger.LogError($"{ClassName}.5DayTrigger", $"Exception occurred attempting to 5DayTrigger", e);
+            }
+        }
+
+        public async void UpdateAssociateType(int associateId, string oldAssociateType, string newAssociateType, int newAssociateTypeId)
+        {
+            try
+            {
+                var company = await _companyService.GetCompany();
+                var associateTypeModel = new AssociateTypeModel();
+                var settings = _ZiplingoEngagementRepository.GetSettings();
+                var associateSummary = await _distributorService.GetAssociate(associateId);
+                var associateOrders = _orderService.GetOrdersByAssociateId(associateId, "");
+                var UserName = _ZiplingoEngagementRepository.GetUsernameById(Convert.ToString(associateId));
+                int enrollerID = 0;
+                int sponsorID = 0;
+                if (_treeService.GetNodeDetail(new NodeId(associateId, 0), TreeType.Enrollment)?.Result.UplineId != null)
+                {
+                    enrollerID = _treeService.GetNodeDetail(new NodeId(associateId, 0), TreeType.Enrollment)?.Result.UplineId.AssociateId ?? 0;
+                }
+                if (_treeService.GetNodeDetail(new NodeId(associateId, 0), TreeType.Unilevel).Result.UplineId != null)
+                {
+                    sponsorID = _treeService.GetNodeDetail(new NodeId(associateId, 0), TreeType.Unilevel)?.Result.UplineId.AssociateId ?? 0;
+                }
+
+                Associate sponsorSummary = new Associate();
+                Associate enrollerSummary = new Associate();
+                if (enrollerID <= 0)
+                {
+                    enrollerSummary = new Associate();
+                }
+                else
+                {
+                    enrollerSummary = await _distributorService.GetAssociate(enrollerID);
+                }
+                if (sponsorID > 0)
+                {
+                    sponsorSummary = await  _distributorService.GetAssociate(sponsorID);
+                }
+                else
+                {
+                    sponsorSummary = enrollerSummary;
+                }
+                associateTypeModel.AssociateId = associateId;
+                associateTypeModel.FirstName = associateSummary.DisplayFirstName;
+                associateTypeModel.LastName = associateSummary.DisplayLastName;
+                associateTypeModel.Email = associateSummary.EmailAddress;
+                associateTypeModel.Phone = (associateSummary.TextNumber == "" || associateSummary.TextNumber == null)
+                    ? associateSummary.PrimaryPhone
+                    : associateSummary.TextNumber;
+                associateTypeModel.OldAssociateBaseType = oldAssociateType;
+                associateTypeModel.NewAssociateBaseType = newAssociateType;
+                associateTypeModel.CompanyDomain = company.BackOfficeHomePageURL;
+                associateTypeModel.LogoUrl = settings.LogoUrl;
+                associateTypeModel.CompanyName = settings.CompanyName;
+                associateTypeModel.AssociateType = associateSummary.AssociateType;
+                associateTypeModel.BackOfficeId = associateSummary.BackOfficeId;
+                associateTypeModel.address = associateSummary.Address.AddressLine1 + " " + associateSummary.Address.AddressLine2 + " " + associateSummary.Address.AddressLine3;
+                associateTypeModel.city = associateSummary.Address.City;
+                associateTypeModel.birthday = associateSummary.BirthDate;
+                associateTypeModel.CountryCode = associateSummary.Address.CountryCode;
+                associateTypeModel.distributerId = associateSummary.BackOfficeId;
+                associateTypeModel.region = associateSummary.Address.CountryCode;
+                associateTypeModel.state = associateSummary.Address.State;
+                associateTypeModel.zip = associateSummary.Address.PostalCode;
+                associateTypeModel.UserName = UserName;
+                associateTypeModel.WebAlias = UserName;
+                associateTypeModel.CompanyUrl = company.BackOfficeHomePageURL;
+                associateTypeModel.LanguageCode = associateSummary.LanguageCode;
+                associateTypeModel.CommissionActive = true;
+                associateTypeModel.EnrollerId = enrollerSummary.AssociateId;
+                associateTypeModel.SponsorId = sponsorSummary.AssociateId;
+                associateTypeModel.EnrollerName = enrollerSummary.DisplayFirstName + ' ' + enrollerSummary.DisplayLastName;
+                associateTypeModel.EnrollerMobile = enrollerSummary.PrimaryPhone;
+                associateTypeModel.EnrollerEmail = enrollerSummary.EmailAddress;
+                associateTypeModel.SponsorName = sponsorSummary.DisplayFirstName + ' ' + sponsorSummary.DisplayLastName;
+                associateTypeModel.SponsorMobile = sponsorSummary.PrimaryPhone;
+                associateTypeModel.SponsorEmail = sponsorSummary.EmailAddress;
+                associateTypeModel.JoinDate = associateSummary.SignupDate.ToUniversalTime();
+                associateTypeModel.AssociateStatus = associateSummary.StatusId;
+                associateTypeModel.ActiveAutoship = associateOrders.Result.Where(o => o.OrderType == OrderType.Autoship).Any();
+                //associateTypeModel.OrderDate = order.OrderDate, // OrderDate added for first order
+
+                var strData = JsonConvert.SerializeObject(associateTypeModel);
+
+                AssociateTypeChange request = new AssociateTypeChange
+                {
+                    associateTypeId = newAssociateTypeId,
+                    associateid = associateId,
+                    companyname = settings.CompanyName,
+                    eventKey = "AssociateTypeChange",
+                    data = strData
+                };
+                var jsonReq = JsonConvert.SerializeObject(request);
+                CallZiplingoEngagementApi(jsonReq, "Campaign/ChangeAssociateType");
+
+            }
+            catch (Exception e)
+            {
+                _logger.LogError("ZiplingoEngagementService.UpdateAssociateType", $"Error trying to send emails to ZipLingo {e.Message} On Type Change", e);
+            }
+        }
+
+        //Upcoming Service Expiry Trigger
+        public void UpcomingServiceExpiry()
+        {
+            try
+            {
+                var settings = _ZiplingoEngagementRepository.GetSettings();
+
+                var services = _ZiplingoEngagementRepository.UpcomingServiceExpiry();
+
+                foreach (var service in services)
+                {
+                    var jsonZiplingoEngagementRequest = JsonConvert.SerializeObject(service);
+
+                    ZiplingoEngagementRequest request = new ZiplingoEngagementRequest();
+
+                    request = new ZiplingoEngagementRequest { associateid = service.associateid, companyname = settings.CompanyName, eventKey = "UpcomingServiceExpiry", data = jsonZiplingoEngagementRequest };
+
+                    var jsonReq = JsonConvert.SerializeObject(request);
+
+                    CallZiplingoEngagementApi(jsonReq, "Campaign/ExecuteTrigger");
+                }
+            }
+            catch (Exception e)
+            {
+                _logger.LogError(e, "Exception occurred in UpcomingServiceExpiry ", JsonConvert.SerializeObject(e.Message));
+            }
+        }
+
+        //Autoship TRIGGER
+        public async void CreateAutoshipTrigger(Autoship autoshipInfo)
+        {
+            try
+            {
+                var company = _companyService.GetCompany();
+                var settings = _ZiplingoEngagementRepository.GetSettings();
+				var associateInfo = await _distributorService.GetAssociate(autoshipInfo.AssociateId);
+				AutoshipInfoMap req = new AutoshipInfoMap();
+
+                req.AssociateId = autoshipInfo.AssociateId;
+                req.AutoshipId = autoshipInfo.AutoshipId;
+                req.AutoshipType = autoshipInfo.AutoshipType.ToString();
+                req.CurrencyCode = autoshipInfo.CurrencyCode;
+                req.Custom = autoshipInfo.Custom;
+                req.Frequency = autoshipInfo.Frequency.ToString();
+                req.FrequencyString = autoshipInfo.FrequencyString;
+                req.LastChargeAmount = autoshipInfo.LastChargeAmount;
+                req.LastProcessDate = autoshipInfo.LastProcessDate;
+                req.LineItems = autoshipInfo.LineItems;
+                req.NextProcessDate = autoshipInfo.NextProcessDate;
+                req.PaymentMerchantId = autoshipInfo.PaymentMerchantId;
+                req.PaymentMethodId = autoshipInfo.PaymentMethodId;
+				req.FirstName = associateInfo.DisplayFirstName;
+				req.LastName = associateInfo.DisplayLastName;
+				req.Email = associateInfo.EmailAddress;
+				req.Phone = associateInfo.PrimaryPhone;
+                req.ShipAddress = autoshipInfo.ShipAddress;
+				req.ProductNames = String.Join(",", autoshipInfo.LineItems.Select(l => l.ProductName));
+				req.ShipMethodId = autoshipInfo.ShipMethodId;
+                req.StartDate = autoshipInfo.StartDate;
+                req.Status = autoshipInfo.Status;
+                req.SubTotal = autoshipInfo.SubTotal;
+                req.TotalCV = autoshipInfo.TotalCV;
+                req.TotalQV = autoshipInfo.TotalQV;
+
+                var strData = JsonConvert.SerializeObject(req);
+
+                ZiplingoEngagementRequest request = new ZiplingoEngagementRequest { associateid = autoshipInfo.AssociateId, companyname = settings.CompanyName, eventKey = "CreateAutoship", data = strData };
+                var jsonReq = JsonConvert.SerializeObject(request);
+                CallZiplingoEngagementApi(jsonReq, "Campaign/ExecuteTrigger");
+            }
+            catch (Exception e)
+            {
+                _logger.LogError($"{ClassName}.CreateAutoshipTrigger", $"Exception occured in attempting CreateAutoshipTrigger", e);
             }
         }
 
@@ -1297,6 +1414,7 @@ namespace WebExtension.Services.ZiplingoEngagementService
                 var settings = _ZiplingoEngagementRepository.GetSettings();
 
                 var paymentData = await _paymentProcessingService.FindPaidPayments(DateTime.Now.Date.AddDays(-1), DateTime.Now.Date, "");
+
                 for (int i = 0; i < paymentData.Length; i = i + 100)
                 {
                     List<CommissionPayment> paymentDataList = new List<CommissionPayment>();
@@ -1331,9 +1449,57 @@ namespace WebExtension.Services.ZiplingoEngagementService
             }
             catch (Exception e)
             {
-               
+                _logger.LogError(e, "Exception occurred in ExecuteCommissionEarned ", JsonConvert.SerializeObject(e.Message));
             }
         }
+
+        public async void UpdateAutoshipTrigger(DirectScale.Disco.Extension.Autoship updatedAutoshipInfo)
+        {
+            try
+            {
+                var company = _companyService.GetCompany();
+                var settings = _ZiplingoEngagementRepository.GetSettings();
+				var associateInfo = await _distributorService.GetAssociate(updatedAutoshipInfo.AssociateId);
+				AutoshipInfoMap req = new AutoshipInfoMap();
+
+                req.AssociateId = updatedAutoshipInfo.AssociateId;
+                req.AutoshipId = updatedAutoshipInfo.AutoshipId;
+                req.AutoshipType = updatedAutoshipInfo.AutoshipType.ToString();
+                req.CurrencyCode = updatedAutoshipInfo.CurrencyCode;
+                req.Custom = updatedAutoshipInfo.Custom;
+                req.Frequency = updatedAutoshipInfo.Frequency.ToString();
+                req.FrequencyString = updatedAutoshipInfo.FrequencyString;
+                req.LastChargeAmount = updatedAutoshipInfo.LastChargeAmount;
+                req.LastProcessDate = updatedAutoshipInfo.LastProcessDate;
+                //req.LineItems = string.Join(",", updatedAutoshipInfo.LineItems.Select(x => x.ProductName).ToArray());
+                req.LineItems = updatedAutoshipInfo.LineItems;
+                req.NextProcessDate = updatedAutoshipInfo.NextProcessDate;
+                req.PaymentMerchantId = updatedAutoshipInfo.PaymentMerchantId;
+                req.PaymentMethodId = updatedAutoshipInfo.PaymentMethodId;
+                req.ShipAddress = updatedAutoshipInfo.ShipAddress;
+				req.FirstName = associateInfo.DisplayFirstName;
+				req.LastName = associateInfo.DisplayLastName;
+				req.Email = associateInfo.EmailAddress;
+				req.Phone = associateInfo.PrimaryPhone;
+				req.ProductNames = String.Join(",", updatedAutoshipInfo.LineItems.Select(l => l.ProductName));
+				req.ShipMethodId = updatedAutoshipInfo.ShipMethodId;
+                req.StartDate = updatedAutoshipInfo.StartDate;
+                req.Status = updatedAutoshipInfo.Status;
+                req.SubTotal = updatedAutoshipInfo.SubTotal;
+                req.TotalCV = updatedAutoshipInfo.TotalCV;
+                req.TotalQV = updatedAutoshipInfo.TotalQV;
+
+                var strData = JsonConvert.SerializeObject(req);
+                ZiplingoEngagementRequest request = new ZiplingoEngagementRequest { associateid = updatedAutoshipInfo.AssociateId, companyname = settings.CompanyName, eventKey = "AutoshipChanged", data = strData };
+                var jsonReq = JsonConvert.SerializeObject(request);
+                CallZiplingoEngagementApi(jsonReq, "Campaign/ExecuteTrigger");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"{ClassName}.AutoshipChangedTrigger", $"Exception occured in attempting AutoshipChangedTrigger", ex);
+            }
+        }
+
 
         public async void CallExecuteCommissionEarnedTrigger(List<CommissionPayment> payments)
         {
@@ -1350,11 +1516,11 @@ namespace WebExtension.Services.ZiplingoEngagementService
                     int sponsorID = 0;
                     if (_treeService.GetNodeDetail(new NodeId(payment.AssociateId, 0), TreeType.Enrollment).Result.UplineId != null)
                     {
-                        enrollerID = _treeService.GetNodeDetail(new NodeId(payment.AssociateId, 0), TreeType.Enrollment).Result?.UplineId.AssociateId ?? 0;
+                        enrollerID = _treeService.GetNodeDetail(new NodeId(payment.AssociateId, 0), TreeType.Enrollment)?.Result.UplineId.AssociateId ?? 0;
                     }
                     if (_treeService.GetNodeDetail(new NodeId(payment.AssociateId, 0), TreeType.Unilevel).Result.UplineId != null)
                     {
-                        sponsorID = _treeService.GetNodeDetail(new NodeId(payment.AssociateId, 0), TreeType.Unilevel).Result?.UplineId.AssociateId ?? 0;
+                        sponsorID = _treeService.GetNodeDetail(new NodeId(payment.AssociateId, 0), TreeType.Unilevel)?.Result.UplineId.AssociateId ?? 0;
                     }
 
                     Associate sponsorSummary = new Associate();
@@ -1365,11 +1531,11 @@ namespace WebExtension.Services.ZiplingoEngagementService
                     }
                     else
                     {
-                        enrollerSummary = _distributorService.GetAssociate(enrollerID).Result;
+                        enrollerSummary = await _distributorService.GetAssociate(enrollerID);
                     }
                     if (sponsorID > 0)
                     {
-                        sponsorSummary = _distributorService.GetAssociate(sponsorID).Result;
+                        sponsorSummary = await _distributorService.GetAssociate(sponsorID);
                     }
                     else
                     {
@@ -1411,7 +1577,7 @@ namespace WebExtension.Services.ZiplingoEngagementService
             }
             catch (Exception e)
             {
-                //_logger.LogError(e, "Exception occurred in ExecuteCommissionEarned ", JsonConvert.SerializeObject(e.Message));
+                _logger.LogError(e, "Exception occurred in ExecuteCommissionEarned ", JsonConvert.SerializeObject(e.Message));
             }
         }
 
@@ -1441,120 +1607,10 @@ namespace WebExtension.Services.ZiplingoEngagementService
                     TransactionNumber = commission.TransactionNumber
                 };
             }
+
             return null;
         }
-        public async void CreateAutoshipTrigger(Autoship autoshipInfo)
-        {
-            try
-            {
-                var company = _companyService.GetCompany();
-                var settings = _ZiplingoEngagementRepository.GetSettings();
-				var associateInfo = await _distributorService.GetAssociate(autoshipInfo.AssociateId);
-				AutoshipInfoMap req = new AutoshipInfoMap();
 
-                req.AssociateId = autoshipInfo.AssociateId;
-                req.AutoshipId = autoshipInfo.AutoshipId;
-                req.AutoshipType = autoshipInfo.AutoshipType.ToString();
-                req.CurrencyCode = autoshipInfo.CurrencyCode;
-                req.Custom = autoshipInfo.Custom;
-                req.Frequency = autoshipInfo.Frequency.ToString();
-                req.FrequencyString = autoshipInfo.FrequencyString;
-                req.LastChargeAmount = autoshipInfo.LastChargeAmount;
-                req.LastProcessDate = autoshipInfo.LastProcessDate;
-                req.LineItems = autoshipInfo.LineItems;
-                req.NextProcessDate = autoshipInfo.NextProcessDate;
-                req.PaymentMerchantId = autoshipInfo.PaymentMerchantId;
-                req.PaymentMethodId = autoshipInfo.PaymentMethodId;
-                req.ShippingAddress = autoshipInfo.ShipAddress;
-				req.FirstName = associateInfo.DisplayFirstName;
-				req.LastName = associateInfo.DisplayLastName;
-				req.Email = associateInfo.EmailAddress;
-				req.Phone = associateInfo.PrimaryPhone;
-				req.ProductNames = String.Join(",", autoshipInfo.LineItems.Select(l => l.ProductName));
-				req.ShipMethodId = autoshipInfo.ShipMethodId;
-                req.StartDate = autoshipInfo.StartDate;
-                req.Status = autoshipInfo.Status;
-                req.SubTotal = autoshipInfo.SubTotal;
-                req.TotalCV = autoshipInfo.TotalCV;
-                req.TotalQV = autoshipInfo.TotalQV;
-
-                var strData = JsonConvert.SerializeObject(req);
-                ZiplingoEngagementRequest request = new ZiplingoEngagementRequest { associateid = autoshipInfo.AssociateId, companyname = settings.CompanyName, eventKey = "CreateAutoship", data = strData };
-                var jsonReq = JsonConvert.SerializeObject(request);
-                CallZiplingoEngagementApi(jsonReq, "Campaign/ExecuteTrigger");
-            }
-            catch (Exception e)
-            {
-               
-            }
-        }
-
-        public async void UpdateAutoshipTrigger(DirectScale.Disco.Extension.Autoship updatedAutoshipInfo)
-        {
-            try
-            {
-                var company = _companyService.GetCompany();
-                var settings = _ZiplingoEngagementRepository.GetSettings();
-				var associateInfo = await _distributorService.GetAssociate(updatedAutoshipInfo.AssociateId);
-				AutoshipInfoMap req = new AutoshipInfoMap();
-
-                req.AssociateId = updatedAutoshipInfo.AssociateId;
-                req.AutoshipId = updatedAutoshipInfo.AutoshipId;
-                req.AutoshipType = updatedAutoshipInfo.AutoshipType.ToString();
-                req.CurrencyCode = updatedAutoshipInfo.CurrencyCode;
-                req.Custom = updatedAutoshipInfo.Custom;
-                req.Frequency = updatedAutoshipInfo.Frequency.ToString();
-                req.FrequencyString = updatedAutoshipInfo.FrequencyString;
-                req.LastChargeAmount = updatedAutoshipInfo.LastChargeAmount;
-                req.LastProcessDate = updatedAutoshipInfo.LastProcessDate;
-                req.LineItems = updatedAutoshipInfo.LineItems;
-                req.NextProcessDate = updatedAutoshipInfo.NextProcessDate;
-                req.PaymentMerchantId = updatedAutoshipInfo.PaymentMerchantId;
-                req.PaymentMethodId = updatedAutoshipInfo.PaymentMethodId;
-                req.ShippingAddress = updatedAutoshipInfo.ShipAddress;
-				req.FirstName = associateInfo.DisplayFirstName;
-				req.LastName = associateInfo.DisplayLastName;
-				req.Email = associateInfo.EmailAddress;
-				req.Phone = associateInfo.PrimaryPhone;
-				req.ProductNames = String.Join(",", updatedAutoshipInfo.LineItems.Select(l => l.ProductName));
-				req.ShipMethodId = updatedAutoshipInfo.ShipMethodId;
-                req.StartDate = updatedAutoshipInfo.StartDate;
-                req.Status = updatedAutoshipInfo.Status;
-                req.SubTotal = updatedAutoshipInfo.SubTotal;
-                req.TotalCV = updatedAutoshipInfo.TotalCV;
-                req.TotalQV = updatedAutoshipInfo.TotalQV;
-
-                var strData = JsonConvert.SerializeObject(req);
-                ZiplingoEngagementRequest request = new ZiplingoEngagementRequest { associateid = updatedAutoshipInfo.AssociateId, companyname = settings.CompanyName, eventKey = "AutoshipChanged", data = strData };
-                var jsonReq = JsonConvert.SerializeObject(request);
-                CallZiplingoEngagementApi(jsonReq, "Campaign/ExecuteTrigger");
-            }
-            catch (Exception ex)
-            {
-            }
-        }
-
-        public void AssociateStatusSync(List<GetAssociateStatusModel> associateStatuses)
-        {
-            try
-            {
-                if (associateStatuses.Count != 0)
-                {
-                    foreach (var item in associateStatuses)
-                    {
-                        var associateSummary = _distributorService.GetAssociate(item.AssociateID).Result;
-                        associateSummary.StatusId = item.CurrentStatusId;
-                        UpdateContact(associateSummary);
-                    }
-                }
-               
-
-            }
-            catch (Exception ex)
-            {
-              
-            }
-
-        }
+      
     }
 }

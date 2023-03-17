@@ -3,7 +3,8 @@ using System.Threading.Tasks;
 using DirectScale.Disco.Extension;
 using DirectScale.Disco.Extension.Hooks;
 using DirectScale.Disco.Extension.Hooks.Orders;
-using WebExtension.Services.ZiplingoEngagementService;
+using WebExtension.ThirdParty.ZiplingoEngagement.Interfaces;
+
 namespace WebExtension.Hooks.Order
 {
     public class FinalizeNonAcceptedOrder: IHook<FinalizeNonAcceptedOrderHookRequest, FinalizeNonAcceptedOrderHookResponse>

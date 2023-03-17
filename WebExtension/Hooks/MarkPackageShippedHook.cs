@@ -2,7 +2,7 @@
 using System.Threading.Tasks;
 using DirectScale.Disco.Extension.Hooks;
 using DirectScale.Disco.Extension.Hooks.Orders.Packages;
-using WebExtension.Services.ZiplingoEngagementService;
+using WebExtension.ThirdParty.ZiplingoEngagement.Interfaces;
 
 namespace WebExtension.Hooks
 {

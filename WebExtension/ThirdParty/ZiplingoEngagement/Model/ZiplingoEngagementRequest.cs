@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace WebExtension.Services.ZiplingoEngagementService.Model
+namespace WebExtension.ThirdParty.Model
 {
     public class ZiplingoEngagementRequest
     {
@@ -12,7 +12,7 @@ namespace WebExtension.Services.ZiplingoEngagementService.Model
         public int associateid { get; set; }
         public string companyname { get; set; } 
         public string data { get; set; }
-        public int associateStatus { get; set; }
         public int rankid { get; set; }
+        public int associateStatus { get; set; }
     }
 }

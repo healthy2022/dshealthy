@@ -1,7 +1,7 @@
 ﻿using DirectScale.Disco.Extension;
 using System.Collections.Generic;
 
-namespace WebExtension.Services.ZiplingoEngagement.Model
+namespace WebExtension.ThirdParty.ZiplingoEngagement.Model
 {
     public class AssociateInfoCommissionEarned
     {

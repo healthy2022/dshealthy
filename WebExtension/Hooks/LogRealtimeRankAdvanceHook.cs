@@ -4,7 +4,7 @@ using DirectScale.Disco.Extension.Hooks;
 using DirectScale.Disco.Extension.Hooks.Commissions;
 using DirectScale.Disco.Extension.Services;
 using WebExtension.Repositories;
-using WebExtension.Services.ZiplingoEngagementService;
+using WebExtension.ThirdParty.ZiplingoEngagement.Interfaces;
 
 namespace WebExtension.Hooks
 {
