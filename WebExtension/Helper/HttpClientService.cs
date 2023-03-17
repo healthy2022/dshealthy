@@ -7,8 +7,10 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Threading.Tasks;
+using WebExtension.Helper;
 
-namespace WebExtension.Helper
+namespace HelloWebExtension.Helper
 {
     public interface IHttpClientService
     {
@@ -16,6 +18,8 @@ namespace WebExtension.Helper
         HttpResponseMessage MakeRequestByToken(HttpRequestMessage request, string tokenType, string token);
         HttpResponseMessage MakeRequestByUsername(HttpRequestMessage request, string username, string password);
         HttpResponseMessage PostRequestByUsername(HttpRequestMessage request, string username, string password);
+        HttpResponseMessage PostRequest(string apiUrl, TokenRequest request);
+
     }
     public class HttpClientService : IHttpClientService
     {
@@ -97,6 +101,38 @@ namespace WebExtension.Helper
                 throw ex;
             }
 
+        }
+
+
+        public HttpResponseMessage PostRequest(string apiUrl, TokenRequest request)
+        {
+            try
+            {
+                using (var httpClient = new HttpClient())
+                {
+                    Task<HttpResponseMessage> task = Task.Run(async () => await SendtokenAsync(request, apiUrl));
+
+                    return task.Result;
+                }
+            }
+            catch (Exception ex)
+            {
+                throw ex;
+            }
+
+        }
+
+        public async Task<HttpResponseMessage> SendtokenAsync(TokenRequest request, string url)
+        {
+            var dict = new Dictionary<string, string>();
+            dict.Add("grant_type", request.grant_type);
+            dict.Add("username", request.username);
+            dict.Add("password", request.password);
+            dict.Add("client_id", request.client_id);
+            var client = new HttpClient();
+            var req = new HttpRequestMessage(HttpMethod.Post, url) { Content = new FormUrlEncodedContent(dict) };
+            var res = await client.SendAsync(req);
+            return res;
         }
     }
 }

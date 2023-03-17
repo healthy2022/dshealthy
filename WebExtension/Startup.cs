@@ -10,6 +10,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using HelloWebExtension.Helper;
 using WebExtension.Helper;
 using WebExtension.Helper.Interface;
 using WebExtension.Helper.Models;
@@ -48,15 +49,15 @@ namespace WebExtension
             //
             //
             //Remark This section before upload
-            //if (CurrentEnvironment.IsDevelopment())
-            //{
-            //    services.AddSingleton<ITokenProvider>(x => new WebExtensionTokenProvider
-            //    {
-            //        DirectScaleUrl = Configuration["configSetting:BaseURL"].Replace("{clientId}", Configuration["configSetting:Client"]).Replace("{environment}", Configuration["configSetting:Environment"]),
-            //        DirectScaleSecret = Configuration["configSetting:DirectScaleSecret"],
-            //        ExtensionSecrets = new[] { Configuration["configSetting:ExtensionSecrets"] }
-            //    });
-            //}
+            if (CurrentEnvironment.IsDevelopment())
+            {
+                services.AddSingleton<ITokenProvider>(x => new WebExtensionTokenProvider
+                {
+                    DirectScaleUrl = Configuration["configSetting:BaseURL"].Replace("{clientId}", Configuration["configSetting:Client"]).Replace("{environment}", Configuration["configSetting:Environment"]),
+                    DirectScaleSecret = Configuration["configSetting:DirectScaleSecret"],
+                    ExtensionSecrets = new[] { Configuration["configSetting:ExtensionSecrets"] }
+                });
+            }
             //Remark This section before upload
             //
             //
@@ -72,6 +73,7 @@ namespace WebExtension
 
             //Services
             services.AddSingleton<IDailyRunService, DailyRunService>();
+            services.AddSingleton<IHttpClientService, HttpClientService>();
             services.AddSingleton<IZiplingoEngagementService, ZiplingoEngagementService>();
             services.AddSingleton<ICommonService, CommonService>();
             services.AddSingleton<ICustomLogService, CustomLogService>();

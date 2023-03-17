@@ -15,6 +15,7 @@ using DirectScale.Disco.Extension.Hooks.Commissions;
 using WebExtension.Services.ZiplingoEngagement.Model;
 
 using System.Text.RegularExpressions;
+using HelloWebExtension.Helper;
 using WebExtension.Helper;
 using WebExtension.Models;
 using WebExtension.Repositories;
@@ -25,7 +26,7 @@ namespace WebExtension.ThirdParty
     {
         private readonly IZiplingoEngagementRepository _ZiplingoEngagementRepository;
         private readonly ICompanyService _companyService;
-        private readonly ILogger _logger;
+        //private readonly ILogger _logger;
         private static readonly string ClassName = typeof(ZiplingoEngagementService).FullName;
         private readonly IOrderService _orderService;
         private readonly IAssociateService _distributorService;
@@ -37,7 +38,7 @@ namespace WebExtension.ThirdParty
 
         public ZiplingoEngagementService(IZiplingoEngagementRepository repository,
             ICompanyService companyService,
-            ILogger logger,
+          //  ILogger logger,
             IOrderService orderService,
             IAssociateService distributorService,
             ITreeService treeService,
@@ -49,7 +50,7 @@ namespace WebExtension.ThirdParty
         {
             _ZiplingoEngagementRepository = repository ?? throw new ArgumentNullException(nameof(repository));
             _companyService = companyService ?? throw new ArgumentNullException(nameof(companyService));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            //_logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _orderService = orderService ?? throw new ArgumentNullException(nameof(orderService));
             _distributorService = distributorService ?? throw new ArgumentNullException(nameof(distributorService));
             _treeService = treeService ?? throw new ArgumentNullException(nameof(treeService));
@@ -140,7 +141,7 @@ namespace WebExtension.ThirdParty
             }
             catch (Exception e)
             {
-                _logger.LogError($"{ClassName}.CallOrderZiplingoEngagementTrigger", $"Exception occurred attempting to Execute CallOrderZiplingoEngagementTrigger for associate {order.AssociateId}", e);
+                //_logger.LogError($"{ClassName}.CallOrderZiplingoEngagementTrigger", $"Exception occurred attempting to Execute CallOrderZiplingoEngagementTrigger for associate {order.AssociateId}", e);
             }
         }
 
@@ -246,7 +247,7 @@ namespace WebExtension.ThirdParty
             }
             catch (Exception e)
             {
-                _logger.LogError($"{ClassName}.CallOrderZiplingoEngagementTrigger", $"Exception occurred attempting to Execute CallOrderZiplingoEngagementTrigger for associate {order.Order.AssociateId}", e);
+                //_logger.LogError($"{ClassName}.CallOrderZiplingoEngagementTrigger", $"Exception occurred attempting to Execute CallOrderZiplingoEngagementTrigger for associate {order.Order.AssociateId}", e);
             }
         }
 
@@ -312,7 +313,7 @@ namespace WebExtension.ThirdParty
             }
             catch (Exception e)
             {
-                _logger.LogError($"{ClassName}.CallOrderZiplingoEngagementTriggerForBirthDayWishes", $"Exception occurred attempting to Execute CallOrderZiplingoEngagementTriggerForBirthDayWishes for associate {assoInfo.AssociateId}", e);
+                //_logger.LogError($"{ClassName}.CallOrderZiplingoEngagementTriggerForBirthDayWishes", $"Exception occurred attempting to Execute CallOrderZiplingoEngagementTriggerForBirthDayWishes for associate {assoInfo.AssociateId}", e);
             }
         }
 
@@ -379,7 +380,7 @@ namespace WebExtension.ThirdParty
             }
             catch (Exception e)
             {
-                _logger.LogError($"{ClassName}.CallOrderZiplingoEngagementTriggerForWorkAnniversary", $"Exception occurred attempting to Execute CallOrderZiplingoEngagementTriggerForWorkAnniversary for associate {assoInfo.AssociateId}", e);
+                //_logger.LogError($"{ClassName}.CallOrderZiplingoEngagementTriggerForWorkAnniversary", $"Exception occurred attempting to Execute CallOrderZiplingoEngagementTriggerForWorkAnniversary for associate {assoInfo.AssociateId}", e);
             }
         }
 
@@ -449,7 +450,7 @@ namespace WebExtension.ThirdParty
             }
             catch (Exception e)
             {
-                _logger.LogError($"{ClassName}.CallOrderZiplingoEngagementTriggerForAssociateRankAdvancement", $"Exception occurred attempting to Execute CallOrderZiplingoEngagementTriggerForAssociateRankAdvancement for associate {assoRankAdvancementInfo.AssociateId}", e);
+                //_logger.LogError($"{ClassName}.CallOrderZiplingoEngagementTriggerForAssociateRankAdvancement", $"Exception occurred attempting to Execute CallOrderZiplingoEngagementTriggerForAssociateRankAdvancement for associate {assoRankAdvancementInfo.AssociateId}", e);
             }
         }
 
@@ -519,7 +520,7 @@ namespace WebExtension.ThirdParty
             }
             catch (Exception e)
             {
-                _logger.LogError($"{ClassName}.CallOrderZiplingoEngagementTriggerForAssociateChangeStatus", $"Exception occurred attempting to Execute CallOrderZiplingoEngagementTriggerForAssociateChangeStatus for associate {assoStatusChangeInfo.AssociateId}", e);
+                //_logger.LogError($"{ClassName}.CallOrderZiplingoEngagementTriggerForAssociateChangeStatus", $"Exception occurred attempting to Execute CallOrderZiplingoEngagementTriggerForAssociateChangeStatus for associate {assoStatusChangeInfo.AssociateId}", e);
             }
         }
 
@@ -602,7 +603,7 @@ namespace WebExtension.ThirdParty
             }
             catch (Exception e)
             {
-                _logger.LogError($"{ClassName}.CreateContact", $"Exception occurred at Execute CreateContact ZiplingoEngagement for associate {order.AssociateId}", e);
+                //_logger.LogError($"{ClassName}.CreateContact", $"Exception occurred at Execute CreateContact ZiplingoEngagement for associate {order.AssociateId}", e);
             }
         }
 
@@ -624,7 +625,7 @@ namespace WebExtension.ThirdParty
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Exception occurred in Associate Change Process");
+                //_logger.LogError(ex, "Exception occurred in Associate Change Process");
             }
         }
 
@@ -718,7 +719,7 @@ namespace WebExtension.ThirdParty
             }
             catch (Exception e)
             {
-                _logger.LogError($"{ClassName}.CreateContact", $"Exception occurred at Execute CreateContact ZiplingoEngagement for associate {req.AssociateId}", e);
+                //_logger.LogError($"{ClassName}.CreateContact", $"Exception occurred at Execute CreateContact ZiplingoEngagement for associate {req.AssociateId}", e);
             }
         }
 
@@ -752,7 +753,7 @@ namespace WebExtension.ThirdParty
             }
         catch (Exception e)
         {
-            _logger.LogError($"Exception occurred at Execute TRC Notification for associate {associateId}", e);
+            //_logger.LogError($"Exception occurred at Execute TRC Notification for associate {associateId}", e);
         }
     }
 
@@ -834,7 +835,7 @@ namespace WebExtension.ThirdParty
             }
             catch (Exception e)
             {
-                _logger.LogError($"{ClassName}.UpdateContact", $"Exception occurred attempting to UpdateContact for associate {req.AssociateId}", e);
+                //_logger.LogError($"{ClassName}.UpdateContact", $"Exception occurred attempting to UpdateContact for associate {req.AssociateId}", e);
             }
         }
 
@@ -867,7 +868,7 @@ namespace WebExtension.ThirdParty
             }
             catch (Exception ex)
             {
-                _logger.LogError($"{ClassName}.ResetZiplingoSettings", $"Exception occurred attempting to ResetSettings", ex);
+              //  _logger.LogError($"{ClassName}.ResetZiplingoSettings", $"Exception occurred attempting to ResetSettings", ex);
             }
         }
 
@@ -971,7 +972,7 @@ namespace WebExtension.ThirdParty
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Exception occurred in Rank Advancement");
+              //  _logger.LogError(ex, "Exception occurred in Rank Advancement");
             }
             return null;
         }
@@ -1011,7 +1012,7 @@ namespace WebExtension.ThirdParty
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Exception occurred in Rank Advancement", JsonConvert.SerializeObject(notification));
+              //  _logger.LogError(ex, "Exception occurred in Rank Advancement", JsonConvert.SerializeObject(notification));
             }
             return null;
         }
@@ -1063,14 +1064,14 @@ namespace WebExtension.ThirdParty
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Exception occurred in Seven DayTrigger autoship record", JsonConvert.SerializeObject(autoinfo));
+                      //  _logger.LogError(ex, "Exception occurred in Seven DayTrigger autoship record", JsonConvert.SerializeObject(autoinfo));
                     }
                 }
 
             }
             catch (Exception e)
             {
-                _logger.LogError($"{ClassName}.Seven DayTrigger", $"Exception occurred attempting to Seven DayTrigger", e);
+               // _logger.LogError($"{ClassName}.Seven DayTrigger", $"Exception occurred attempting to Seven DayTrigger", e);
             }
         }
 
@@ -1111,7 +1112,7 @@ namespace WebExtension.ThirdParty
             }
             catch (Exception e)
             {
-                _logger.LogError($"5DayTrigger", $"Exception occurred attempting to 5DayTrigger", e);
+               // _logger.LogError($"5DayTrigger", $"Exception occurred attempting to 5DayTrigger", e);
             }
         }
         public async void CallFiveDayRunTrigger(List<FivedayAutoshipModel> autoshipList)
@@ -1188,7 +1189,7 @@ namespace WebExtension.ThirdParty
 
             catch (Exception e)
             {
-                _logger.LogError($"5DayTrigger", $"Exception occurred attempting to 5DayTrigger", e);
+               // _logger.LogError($"5DayTrigger", $"Exception occurred attempting to 5DayTrigger", e);
             }
         }
 
@@ -1222,14 +1223,14 @@ namespace WebExtension.ThirdParty
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Exception occurred in Get Card Expiring Info Before 30 Days", JsonConvert.SerializeObject(info));
+                     //   _logger.LogError(ex, "Exception occurred in Get Card Expiring Info Before 30 Days", JsonConvert.SerializeObject(info));
                     }
                 }
 
             }
             catch (Exception e)
             {
-                _logger.LogError($"{ClassName}.5DayTrigger", $"Exception occurred attempting to 5DayTrigger", e);
+               // _logger.LogError($"{ClassName}.5DayTrigger", $"Exception occurred attempting to 5DayTrigger", e);
             }
         }
 
@@ -1328,7 +1329,7 @@ namespace WebExtension.ThirdParty
             }
             catch (Exception e)
             {
-                _logger.LogError("ZiplingoEngagementService.UpdateAssociateType", $"Error trying to send emails to ZipLingo {e.Message} On Type Change", e);
+              //  _logger.LogError("ZiplingoEngagementService.UpdateAssociateType", $"Error trying to send emails to ZipLingo {e.Message} On Type Change", e);
             }
         }
 
@@ -1356,7 +1357,7 @@ namespace WebExtension.ThirdParty
             }
             catch (Exception e)
             {
-                _logger.LogError(e, "Exception occurred in UpcomingServiceExpiry ", JsonConvert.SerializeObject(e.Message));
+              //  _logger.LogError(e, "Exception occurred in UpcomingServiceExpiry ", JsonConvert.SerializeObject(e.Message));
             }
         }
 
@@ -1404,7 +1405,7 @@ namespace WebExtension.ThirdParty
             }
             catch (Exception e)
             {
-                _logger.LogError($"{ClassName}.CreateAutoshipTrigger", $"Exception occured in attempting CreateAutoshipTrigger", e);
+             //   _logger.LogError($"{ClassName}.CreateAutoshipTrigger", $"Exception occured in attempting CreateAutoshipTrigger", e);
             }
         }
 
@@ -1450,7 +1451,7 @@ namespace WebExtension.ThirdParty
             }
             catch (Exception e)
             {
-                _logger.LogError(e, "Exception occurred in ExecuteCommissionEarned ", JsonConvert.SerializeObject(e.Message));
+             //   _logger.LogError(e, "Exception occurred in ExecuteCommissionEarned ", JsonConvert.SerializeObject(e.Message));
             }
         }
 
@@ -1497,7 +1498,7 @@ namespace WebExtension.ThirdParty
             }
             catch (Exception ex)
             {
-                _logger.LogError($"{ClassName}.AutoshipChangedTrigger", $"Exception occured in attempting AutoshipChangedTrigger", ex);
+              //  _logger.LogError($"{ClassName}.AutoshipChangedTrigger", $"Exception occured in attempting AutoshipChangedTrigger", ex);
             }
         }
 
@@ -1578,7 +1579,7 @@ namespace WebExtension.ThirdParty
             }
             catch (Exception e)
             {
-                _logger.LogError(e, "Exception occurred in ExecuteCommissionEarned ", JsonConvert.SerializeObject(e.Message));
+              //  _logger.LogError(e, "Exception occurred in ExecuteCommissionEarned ", JsonConvert.SerializeObject(e.Message));
             }
         }
 
